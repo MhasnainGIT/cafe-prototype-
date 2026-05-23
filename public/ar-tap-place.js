@@ -6,6 +6,9 @@ const params = new URLSearchParams(location.search);
 const modelUrl = params.get('model') || '/models/Sushi_Platter.glb';
 const AUTO_ROTATE_SPEED = 0.35;
 const TAP_MOVE_PX = 14;
+const DAMPING_FACTOR = 0.92;
+const MIN_PHI = Math.PI * 0.05;
+const MAX_PHI = Math.PI * 0.75;
 
 const _raycaster = new THREE.Raycaster();
 const _plane = new THREE.Plane();
@@ -21,6 +24,7 @@ const canvas = document.getElementById('ar-canvas');
 const video = document.getElementById('ar-video');
 const container = document.getElementById('ar-container');
 const startBtn = document.getElementById('start-ar-btn');
+const modelViewer = document.getElementById('ar-model-viewer');
 
 let renderer, scene, camera, anchor, modelMesh, mixer;
 const clock = new THREE.Clock();
@@ -40,9 +44,10 @@ let initialAlphaOffset = null;
 let deviceOrientation = { alpha: 0, beta: 0, gamma: 0 };
 
 function onDeviceOrientation(event) {
-  // Skip if alpha is null, using WebXR, or (after placement) to keep the camera from re-orienting.
-  // This prevents the model from feeling like it’s attached to the screen.
-  if (event.alpha === null || useWebXR || placed) return;
+  // Skip if alpha is null or using WebXR (which handles camera tracking natively).
+  // Keep updating after placement so the camera follows the phone's physical
+  // orientation while the model stays at its fixed world-space anchor.
+  if (event.alpha === null || useWebXR) return;
 
 
   const alpha = THREE.MathUtils.degToRad(event.alpha); // Z
@@ -85,16 +90,21 @@ const gesture = {
   prev: null,
   scaleFactor: 1,
   baseScale: 1,
-  minScale: 0.25,
-  maxScale: 4,
+  minScale: 0.1,
+  maxScale: 10,
   userInteracting: false,
   idleTimer: null,
   touchMoved: false,
   pointerId: null,
   lastPointer: { x: 0, y: 0 },
   startSpread: 0,
-  // Store the world position where the object was placed
   placedWorldPosition: null,
+  // Spherical orbit angles matching <model-viewer> camera-controls.
+  theta: 0,
+  phi: Math.PI / 2.2,
+  // Velocity for momentum/damping after drag release.
+  velocityTheta: 0,
+  velocityPhi: 0,
 };
 
 function isMobileDevice() {
@@ -300,10 +310,24 @@ function ndcFromClient(clientX, clientY) {
   };
 }
 
+function showModelViewer() {
+  if (placed) return;
+  modelViewer.setAttribute('src', modelUrl);
+  modelViewer.style.display = 'block';
+  canvas.style.display = 'none';
+  placed = true;
+  running = false;
+  setHint('Drag to rotate · Pinch to zoom', 'found');
+}
+
 function onPlaceTap(clientX, clientY) {
   if (gesture.userInteracting) return;
   if (useWebXR && lastHitMatrix) {
     placeFromMatrix(lastHitMatrix);
+    return;
+  }
+  if (!useWebXR) {
+    showModelViewer();
     return;
   }
   const ndc = ndcFromClient(clientX, clientY);
@@ -334,6 +358,8 @@ function touchState(ev) {
 
 function onTouchStart(ev) {
   if (ev.touches.length > 2) return;
+  // Prevent browser scroll/zoom on the AR canvas so gestures stay smooth.
+  if (placed) ev.preventDefault();
   gesture.touchMoved = false;
   gesture.prev = touchState(ev);
   if (gesture.prev && gesture.prev.count >= 2) {
@@ -347,6 +373,9 @@ function onTouchStart(ev) {
 }
 
 function onTouchMove(ev) {
+  // Block browser scroll/zoom early so vertical swipes aren't consumed.
+  if (placed) ev.preventDefault();
+
   const cur = touchState(ev);
   if (!cur || !gesture.prev) {
     gesture.prev = cur;
@@ -363,21 +392,17 @@ function onTouchMove(ev) {
     updatePlacementPreview(ndc.x, ndc.y);
   }
 
-  // Single-finger drag rotates the model around Y axis and X axis (like model-viewer)
+  // Single-finger drag: orbit-style rotation matching <model-viewer camera-controls>.
   if (placed && cur.count === 1 && gesture.prev.count === 1 && modelMesh) {
-    const deltaX = (cur.rawX - gesture.prev.rawX) * (window.innerWidth + window.innerHeight) / 2;
-    const deltaY = (cur.rawY - gesture.prev.rawY) * (window.innerWidth + window.innerHeight) / 2;
-    const rotationSpeed = 0.005; // Radians per pixel
-    
-    // Rotate model around Y axis (horizontal drag)
-    modelMesh.rotation.y += deltaX * rotationSpeed;
-    
-    // Rotate model around X axis (vertical drag)
-    modelMesh.rotation.x += deltaY * rotationSpeed;
-    
-    // Clamp X rotation to prevent the plate from flipping upside down
-    modelMesh.rotation.x = THREE.MathUtils.clamp(modelMesh.rotation.x, -Math.PI / 3, Math.PI / 3);
-    
+    const deltaX = cur.rawX - gesture.prev.rawX;
+    const deltaY = cur.rawY - gesture.prev.rawY;
+    const rotationSpeed = 0.005;
+
+    gesture.velocityTheta = -deltaX * rotationSpeed;
+    gesture.velocityPhi = deltaY * rotationSpeed;
+    gesture.theta += gesture.velocityTheta;
+    gesture.phi = THREE.MathUtils.clamp(gesture.phi + gesture.velocityPhi, MIN_PHI, MAX_PHI);
+    applyOrbitQuaternion();
     markInteracting();
   }
 
@@ -442,8 +467,15 @@ function onPointerMove(ev) {
 
   if (placed && gesture.pointerId === ev.pointerId && modelMesh) {
     const deltaX = ev.clientX - gesture.lastPointer.x;
-    const rotationSpeed = 0.007; // Radians per pixel
-    modelMesh.rotation.y += deltaX * rotationSpeed;
+    const deltaY = ev.clientY - gesture.lastPointer.y;
+    const rotationSpeed = 0.005;
+
+    gesture.velocityTheta = -deltaX * rotationSpeed;
+    gesture.velocityPhi = deltaY * rotationSpeed;
+    gesture.theta += gesture.velocityTheta;
+    gesture.phi = THREE.MathUtils.clamp(gesture.phi + gesture.velocityPhi, MIN_PHI, MAX_PHI);
+    applyOrbitQuaternion();
+
     gesture.lastPointer.x = ev.clientX;
     gesture.lastPointer.y = ev.clientY;
     markInteracting();
@@ -462,8 +494,10 @@ function onPointerUp(ev) {
 }
 
 function onWheel(ev) {
-  // Disabled entirely (per requirements).
   ev.preventDefault();
+  if (!placed || !modelMesh) return;
+  const factor = ev.deltaY > 0 ? 0.92 : 1.08;
+  zoomByFactor(factor);
 }
 
 function onCanvasClick(ev) {
@@ -565,10 +599,35 @@ function initOrbitFromCamera() {
   orbitState.enabled = true;
 }
 
-function updateAutoRotate(dt) {
-  // Intentionally disabled to keep the object fixed relative to the world.
-  // Zoom is still handled by scaling the model.
-  void dt;
+function applyOrbitQuaternion() {
+  if (!modelMesh) return;
+  const qY = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(0, 1, 0), gesture.theta
+  );
+  const qX = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(1, 0, 0), gesture.phi - Math.PI / 2
+  );
+  modelMesh.quaternion.copy(qY).multiply(qX);
+  modelMesh.quaternion.normalize();
+}
+
+function updateDampingAndAutoRotate(dt) {
+  if (!placed || !modelMesh) return;
+
+  // Apply momentum damping when user is not interacting.
+  if (!gesture.userInteracting) {
+    if (Math.abs(gesture.velocityTheta) > 1e-5 || Math.abs(gesture.velocityPhi) > 1e-5) {
+      gesture.theta += gesture.velocityTheta;
+      gesture.phi = THREE.MathUtils.clamp(gesture.phi + gesture.velocityPhi, MIN_PHI, MAX_PHI);
+      gesture.velocityTheta *= DAMPING_FACTOR;
+      gesture.velocityPhi *= DAMPING_FACTOR;
+      applyOrbitQuaternion();
+    } else {
+      // Auto-rotate when fully idle (no remaining momentum).
+      gesture.theta += AUTO_ROTATE_SPEED * dt;
+      applyOrbitQuaternion();
+    }
+  }
 }
 
 function renderFrame(_t, frame) {
@@ -597,7 +656,7 @@ function renderFrame(_t, frame) {
     }
   }
 
-  updateAutoRotate(dt);
+  updateDampingAndAutoRotate(dt);
   renderer.render(scene, camera);
 }
 
@@ -700,8 +759,8 @@ async function startCameraFallback() {
 
   syncCameraFov();
   reticle.visible = true;
-  // In fallback mode (no WebXR hit-test), we still must keep the model at a fixed world anchor.
-  // Disable device-orientation camera updates after placement to prevent “screen-space attached” feel.
+  // In fallback mode (no WebXR hit-test), device orientation keeps the camera
+  // tracking the phone's rotation so the model stays at its world-space anchor.
   setHint('Tap the table to place · then rotate and pinch to zoom');
   running = true;
 
@@ -774,6 +833,11 @@ async function startAR() {
 
 async function init() {
   setupScene();
+
+  // Preload model in <model-viewer> so it's ready instantly on tap.
+  modelViewer.setAttribute('src', modelUrl);
+  modelViewer.setAttribute('loading', 'eager');
+
   try {
     await loadModel();
   } catch (err) {
