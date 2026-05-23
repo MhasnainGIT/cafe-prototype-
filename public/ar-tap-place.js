@@ -6,6 +6,9 @@ const params = new URLSearchParams(location.search);
 const modelUrl = params.get('model') || '/models/Sushi_Platter.glb';
 const AUTO_ROTATE_SPEED = 0.35;
 const TAP_MOVE_PX = 14;
+const DAMPING_FACTOR = 0.92;
+const MIN_PHI = Math.PI * 0.05;
+const MAX_PHI = Math.PI * 0.75;
 
 const _raycaster = new THREE.Raycaster();
 const _plane = new THREE.Plane();
@@ -94,8 +97,13 @@ const gesture = {
   pointerId: null,
   lastPointer: { x: 0, y: 0 },
   startSpread: 0,
-  // Store the world position where the object was placed
   placedWorldPosition: null,
+  // Spherical orbit angles matching <model-viewer> camera-controls.
+  theta: 0,
+  phi: Math.PI / 2.2,
+  // Velocity for momentum/damping after drag release.
+  velocityTheta: 0,
+  velocityPhi: 0,
 };
 
 function isMobileDevice() {
@@ -371,23 +379,15 @@ function onTouchMove(ev) {
 
   // Single-finger drag: orbit-style rotation matching <model-viewer camera-controls>.
   if (placed && cur.count === 1 && gesture.prev.count === 1 && modelMesh) {
-    const deltaX = cur.rawX - gesture.prev.rawX; // pixels
+    const deltaX = cur.rawX - gesture.prev.rawX;
     const deltaY = cur.rawY - gesture.prev.rawY;
-    const rotationSpeed = 0.006;
+    const rotationSpeed = 0.005;
 
-    // Horizontal drag → turntable rotation around world Y (world space)
-    const qY = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 1, 0), deltaX * rotationSpeed
-    );
-    // Vertical drag → tilt around local X axis (local space)
-    const qX = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(1, 0, 0), deltaY * rotationSpeed
-    );
-
-    modelMesh.quaternion.premultiply(qY); // world-space turntable
-    modelMesh.quaternion.multiply(qX);    // local-space tilt
-    modelMesh.quaternion.normalize();
-
+    gesture.velocityTheta = -deltaX * rotationSpeed;
+    gesture.velocityPhi = deltaY * rotationSpeed;
+    gesture.theta += gesture.velocityTheta;
+    gesture.phi = THREE.MathUtils.clamp(gesture.phi + gesture.velocityPhi, MIN_PHI, MAX_PHI);
+    applyOrbitQuaternion();
     markInteracting();
   }
 
@@ -453,19 +453,13 @@ function onPointerMove(ev) {
   if (placed && gesture.pointerId === ev.pointerId && modelMesh) {
     const deltaX = ev.clientX - gesture.lastPointer.x;
     const deltaY = ev.clientY - gesture.lastPointer.y;
-    const rotationSpeed = 0.007;
+    const rotationSpeed = 0.005;
 
-    // Same orbit-style rotation as touch: Y turntable + X tilt
-    const qY = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 1, 0), deltaX * rotationSpeed
-    );
-    const qX = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(1, 0, 0), deltaY * rotationSpeed
-    );
-
-    modelMesh.quaternion.premultiply(qY); // world-space turntable
-    modelMesh.quaternion.multiply(qX);    // local-space tilt
-    modelMesh.quaternion.normalize();
+    gesture.velocityTheta = -deltaX * rotationSpeed;
+    gesture.velocityPhi = deltaY * rotationSpeed;
+    gesture.theta += gesture.velocityTheta;
+    gesture.phi = THREE.MathUtils.clamp(gesture.phi + gesture.velocityPhi, MIN_PHI, MAX_PHI);
+    applyOrbitQuaternion();
 
     gesture.lastPointer.x = ev.clientX;
     gesture.lastPointer.y = ev.clientY;
@@ -590,13 +584,35 @@ function initOrbitFromCamera() {
   orbitState.enabled = true;
 }
 
-function updateAutoRotate(dt) {
-  if (!placed || !modelMesh || gesture.userInteracting) return;
+function applyOrbitQuaternion() {
+  if (!modelMesh) return;
   const qY = new THREE.Quaternion().setFromAxisAngle(
-    new THREE.Vector3(0, 1, 0), AUTO_ROTATE_SPEED * dt
+    new THREE.Vector3(0, 1, 0), gesture.theta
   );
-  modelMesh.quaternion.premultiply(qY);
+  const qX = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(1, 0, 0), gesture.phi - Math.PI / 2
+  );
+  modelMesh.quaternion.copy(qY).multiply(qX);
   modelMesh.quaternion.normalize();
+}
+
+function updateDampingAndAutoRotate(dt) {
+  if (!placed || !modelMesh) return;
+
+  // Apply momentum damping when user is not interacting.
+  if (!gesture.userInteracting) {
+    if (Math.abs(gesture.velocityTheta) > 1e-5 || Math.abs(gesture.velocityPhi) > 1e-5) {
+      gesture.theta += gesture.velocityTheta;
+      gesture.phi = THREE.MathUtils.clamp(gesture.phi + gesture.velocityPhi, MIN_PHI, MAX_PHI);
+      gesture.velocityTheta *= DAMPING_FACTOR;
+      gesture.velocityPhi *= DAMPING_FACTOR;
+      applyOrbitQuaternion();
+    } else {
+      // Auto-rotate when fully idle (no remaining momentum).
+      gesture.theta += AUTO_ROTATE_SPEED * dt;
+      applyOrbitQuaternion();
+    }
+  }
 }
 
 function renderFrame(_t, frame) {
@@ -625,7 +641,7 @@ function renderFrame(_t, frame) {
     }
   }
 
-  updateAutoRotate(dt);
+  updateDampingAndAutoRotate(dt);
   renderer.render(scene, camera);
 }
 
