@@ -36,9 +36,9 @@ let initialAlphaOffset = null;
 let deviceOrientation = { alpha: 0, beta: 0, gamma: 0 };
 
 function onDeviceOrientation(event) {
-  // Skip if alpha is null, using WebXR, or (after placement) to keep the camera from re-orienting.
-  // This prevents the model from feeling like it’s attached to the screen.
-  if (event.alpha === null || useWebXR || placed) return;
+  // Always update camera rotation in fallback mode to keep the world static.
+  // If we stop updating, the model will appear 'stuck' to the phone screen.
+  if (event.alpha === null || useWebXR) return;
 
 
   const alpha = THREE.MathUtils.degToRad(event.alpha); // Z
@@ -70,6 +70,8 @@ const gesture = {
   lastRotateX: 0,
   lastRotateY: 0,
   touchMoved: false,
+  holdTimer: null,
+  isDragging: false,
 };
 
 /** Create dynamic UI for instructions and reset */
@@ -288,7 +290,9 @@ function ndcFromClient(clientX, clientY) {
 function onPlaceTap(clientX, clientY) {
   if (placed) return;
   if (useWebXR && lastHitMatrix) {
-    anchor.position.setFromMatrixPosition(_m4.fromArray(lastHitMatrix));
+    _m4.fromArray(lastHitMatrix);
+    anchor.position.setFromMatrixPosition(_m4);
+    anchor.quaternion.setFromRotationMatrix(_m4);
     onModelPlaced();
     return;
   }
@@ -301,7 +305,20 @@ function onTouchStart(ev) {
     gesture.active = true;
     gesture.lastRotateX = ev.touches[0].pageX;
     gesture.lastRotateY = ev.touches[0].pageY;
+    gesture.touchMoved = false;
+
+    if (placed) {
+      // Detect long press to start dragging/repositioning
+      gesture.holdTimer = setTimeout(() => {
+        if (!gesture.touchMoved) {
+          gesture.isDragging = true;
+          if (navigator.vibrate) navigator.vibrate(50); // Haptic feedback
+          updateUI('Repositioning model...');
+        }
+      }, 600);
+    }
   } else if (ev.touches.length === 2) {
+    if (gesture.holdTimer) clearTimeout(gesture.holdTimer);
     gesture.pinchDistance = Math.hypot(
       ev.touches[1].pageX - ev.touches[0].pageX,
       ev.touches[1].pageY - ev.touches[0].pageY
@@ -316,10 +333,21 @@ function onTouchMove(ev) {
   if (ev.touches.length === 1) {
     const deltaX = ev.touches[0].pageX - gesture.lastRotateX;
     const deltaY = ev.touches[0].pageY - gesture.lastRotateY;
-    
-    modelMesh.rotation.y += deltaX * 0.01;
-    modelMesh.rotation.x += deltaY * 0.01;
-    
+
+    // If finger moves significantly, it's a rotation, not a hold
+    if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
+      gesture.touchMoved = true;
+      if (gesture.holdTimer) clearTimeout(gesture.holdTimer);
+    }
+
+    if (gesture.isDragging) {
+      // Movement is handled by updating anchor position in renderFrame hit-test
+    } else {
+      // Standard rotation logic
+      modelMesh.rotation.y += deltaX * 0.01;
+      modelMesh.rotation.x += deltaY * 0.01;
+    }
+
     gesture.lastRotateX = ev.touches[0].pageX;
     gesture.lastRotateY = ev.touches[0].pageY;
   } else if (ev.touches.length === 2) {
@@ -335,6 +363,9 @@ function onTouchMove(ev) {
 }
 
 function onTouchEnd(ev) {
+  if (gesture.holdTimer) clearTimeout(gesture.holdTimer);
+  
+  gesture.isDragging = false;
   gesture.active = false;
   if (ev.touches.length === 0 && !placed) {
     const t = ev.changedTouches[0];
@@ -421,7 +452,15 @@ function renderFrame(_t, frame) {
       if (pose) {
         lastHitMatrix = pose.transform.matrix;
         reticle.matrix.fromArray(lastHitMatrix);
-        reticle.visible = !placed;
+
+        // Update model transform if user is currently "holding to move"
+        if (gesture.isDragging) {
+          _m4.fromArray(lastHitMatrix);
+          anchor.position.setFromMatrixPosition(_m4);
+          anchor.quaternion.setFromRotationMatrix(_m4);
+        }
+
+        reticle.visible = !placed || gesture.isDragging;
         if (!placed) updateUI('Tap to place');
       } else {
         reticle.visible = false;
