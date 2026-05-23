@@ -16,19 +16,19 @@ function Gallery() {
   const [selectedImage, setSelectedImage] = useState(null);
 
   return (
-    <div className="section" style={{ paddingTop: '120px' }}>
+    <div className="page-shell">
       <h1 className="section-title">Gallery</h1>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '1rem', maxWidth: '1000px', margin: '0 auto' }}>
-        {GALLERY_IMAGES.map(item => (
-          <div key={item.id} style={{ cursor: 'pointer', overflow: 'hidden', height: '250px', borderRadius: '10px' }}
+      <div className="gallery-grid">
+        {GALLERY_IMAGES.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className="gallery-item"
             onClick={() => setSelectedImage(item.image_url)}
+            aria-label={item.caption}
           >
-            <img src={item.image_url} alt={item.caption}
-              style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.35s' }}
-              onMouseOver={e => e.currentTarget.style.transform = 'scale(1.05)'}
-              onMouseOut={e => e.currentTarget.style.transform = 'scale(1)'}
-            />
-          </div>
+            <img src={item.image_url} alt={item.caption} loading="lazy" />
+          </button>
         ))}
       </div>
       <Lightbox image={selectedImage} onClose={() => setSelectedImage(null)} />

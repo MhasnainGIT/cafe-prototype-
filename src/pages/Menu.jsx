@@ -41,8 +41,8 @@ function Menu() {
     <div className="menu-page">
       {/* Header area */}
       <div className="menu-header-area">
-        <h1 className="menu-page-title">Flynn Cafe</h1>
-        <p className="menu-page-sub">Immersive Culinary Experiences</p>
+        <h1 className="menu-page-title">Menu</h1>
+        <p className="menu-page-sub">Tap 3D or AR on any dish</p>
         <div className="menu-delivery-badge">
           <span className="delivery-dot"></span>
           Dine-in · Estimated wait: <strong>15-25 min</strong>

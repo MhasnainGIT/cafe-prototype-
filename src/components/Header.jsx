@@ -1,55 +1,65 @@
-import { Link } from 'react-router-dom';
-import { ShoppingCart } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { ShoppingCart, Menu, X } from 'lucide-react';
 import { useCart } from '../context/CartContext';
+
+const NAV_LINKS = [
+  { to: '/menu', label: 'Menu' },
+  { to: '/about', label: 'Story' },
+  { to: '/gallery', label: 'Gallery' },
+  { to: '/contact', label: 'Contact' },
+];
 
 function Header() {
   const { cart } = useCart();
+  const location = useLocation();
+  const [open, setOpen] = useState(false);
   const itemCount = cart.reduce((total, item) => total + item.quantity, 0);
 
+  useEffect(() => {
+    setOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    document.body.classList.toggle('nav-open', open);
+    return () => document.body.classList.remove('nav-open');
+  }, [open]);
+
   return (
-    <header style={{
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      padding: '1.2rem 5%',
-      position: 'fixed',
-      top: 0, left: 0, right: 0,
-      zIndex: 200,
-      background: 'rgba(13,13,13,0.85)',
-      backdropFilter: 'blur(12px)',
-      borderBottom: '1px solid rgba(255,255,255,0.07)'
-    }}>
-      <div className="logo">
-        <Link to="/" style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', color: 'var(--color-gold)' }}>Flynn Cafe</Link>
-      </div>
-      <nav style={{ display: 'flex', gap: '2rem', alignItems: 'center' }}>
-        <Link to="/menu" style={{ color: 'var(--color-cream)', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.05em' }}>Menu</Link>
-        <Link to="/about" style={{ color: 'var(--color-cream)', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.05em' }}>Story</Link>
-        <Link to="/gallery" style={{ color: 'var(--color-cream)', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.05em' }}>Gallery</Link>
-        <Link to="/contact" style={{ color: 'var(--color-cream)', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '0.05em' }}>Contact</Link>
-        
-        <Link to="/cart" style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-          <ShoppingCart color="var(--color-gold)" size={24} />
-          {itemCount > 0 && (
-            <span style={{
-              position: 'absolute',
-              top: '-8px',
-              right: '-10px',
-              background: 'var(--color-cream)',
-              color: 'var(--color-bg)',
-              borderRadius: '50%',
-              width: '20px',
-              height: '20px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '0.75rem',
-              fontWeight: 'bold'
-            }}>
-              {itemCount}
-            </span>
-          )}
+    <header className="site-header">
+      <Link to="/" className="site-logo" onClick={() => setOpen(false)}>
+        Flynn Cafe
+      </Link>
+
+      <div className="site-header-actions">
+        <Link to="/cart" className="site-cart" aria-label="Cart" onClick={() => setOpen(false)}>
+          <ShoppingCart size={20} strokeWidth={1.75} />
+          {itemCount > 0 && <span className="site-cart-count">{itemCount}</span>}
         </Link>
+        <button
+          type="button"
+          className="nav-toggle"
+          aria-label={open ? 'Close menu' : 'Open menu'}
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? <X size={22} strokeWidth={1.75} /> : <Menu size={22} strokeWidth={1.75} />}
+        </button>
+      </div>
+
+      <div className={`nav-backdrop ${open ? 'is-visible' : ''}`} onClick={() => setOpen(false)} aria-hidden />
+
+      <nav className={`site-nav ${open ? 'is-open' : ''}`} aria-label="Main">
+        {NAV_LINKS.map(({ to, label }) => (
+          <Link
+            key={to}
+            to={to}
+            className={`site-nav-link ${location.pathname === to ? 'is-active' : ''}`}
+            onClick={() => setOpen(false)}
+          >
+            {label}
+          </Link>
+        ))}
       </nav>
     </header>
   );

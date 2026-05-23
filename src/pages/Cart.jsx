@@ -7,7 +7,7 @@ function Cart() {
   const [formData, setFormData] = useState({ name: '', contact: '', table: '' });
   const [orderStatus, setOrderStatus] = useState(null);
 
-  const total = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+  const total = cart.reduce((acc, item) => acc + item.price * item.quantity, 0);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -18,60 +18,86 @@ function Cart() {
         customer_name: formData.name,
         contact: formData.contact,
         table_number: formData.table,
-        total: total,
-        status: 'pending'
+        total,
+        status: 'pending',
       });
       setOrderStatus('success');
       clearCart();
-    } catch (err) {
+    } catch {
       setOrderStatus('error');
     }
   };
 
   if (orderStatus === 'success') {
     return (
-      <div className="section" style={{ paddingTop: '120px', textAlign: 'center' }}>
+      <div className="page-shell" style={{ textAlign: 'center' }}>
         <h1 className="section-title">Order Confirmed</h1>
-        <p style={{ color: 'var(--color-cream)', fontSize: '1.2rem' }}>Thank you! Your order has been placed.</p>
-        <button className="btn" style={{ marginTop: '2rem' }} onClick={() => setOrderStatus(null)}>New Order</button>
+        <p className="page-lead" style={{ marginBottom: '1.5rem' }}>
+          Thank you! Your order has been placed.
+        </p>
+        <button type="button" className="btn" onClick={() => setOrderStatus(null)}>
+          New Order
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="section" style={{ paddingTop: '120px', maxWidth: '800px', margin: '0 auto' }}>
+    <div className="page-shell">
       <h1 className="section-title">Your Cart</h1>
-      
+
       {cart.length === 0 ? (
-        <p style={{ textAlign: 'center', color: 'var(--color-muted)' }}>Your cart is empty.</p>
+        <p style={{ textAlign: 'center', color: 'var(--color-muted)', fontSize: '0.9rem' }}>
+          Your cart is empty.
+        </p>
       ) : (
-        <div style={{ display: 'grid', gap: '2rem' }}>
-          <div style={{ background: 'var(--color-surface)', padding: '2rem', borderRadius: '4px' }}>
-            {cart.map(item => (
-              <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '1rem', marginBottom: '1rem' }}>
+        <div className="cart-layout">
+          <div className="cart-panel">
+            {cart.map((item) => (
+              <div key={item.id} className="cart-row">
                 <div>
-                  <h3 style={{ margin: 0, color: 'var(--color-cream)' }}>{item.name}</h3>
-                  <p style={{ margin: 0, color: 'var(--color-gold)' }}>${item.price}</p>
+                  <h3 className="cart-row-title">{item.name}</h3>
+                  <p className="cart-row-price">₹{item.price}</p>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <button className="btn" style={{ padding: '0.2rem 0.5rem' }} onClick={() => updateQuantity(item.id, -1)}>-</button>
+                <div className="cart-qty">
+                  <button type="button" className="btn" onClick={() => updateQuantity(item.id, -1)}>
+                    −
+                  </button>
                   <span>{item.quantity}</span>
-                  <button className="btn" style={{ padding: '0.2rem 0.5rem' }} onClick={() => updateQuantity(item.id, 1)}>+</button>
+                  <button type="button" className="btn" onClick={() => updateQuantity(item.id, 1)}>
+                    +
+                  </button>
                 </div>
               </div>
             ))}
-            <div style={{ textAlign: 'right', fontSize: '1.5rem', color: 'var(--color-gold)', marginTop: '2rem' }}>
-              Total: ${total}
-            </div>
+            <p className="cart-total">Total: ₹{total}</p>
           </div>
 
-          <form onSubmit={handleSubmit} style={{ background: 'var(--color-surface)', padding: '2rem', borderRadius: '4px', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <h2 style={{ color: 'var(--color-cream)', marginBottom: '1rem' }}>Checkout Details</h2>
-            <input required placeholder="Name" style={inputStyle} value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-            <input required placeholder="Contact (Phone/Email)" style={inputStyle} value={formData.contact} onChange={e => setFormData({...formData, contact: e.target.value})} />
-            <input required placeholder="Table Number or 'Pickup'" style={inputStyle} value={formData.table} onChange={e => setFormData({...formData, table: e.target.value})} />
-            <button type="submit" className="btn btn-primary" disabled={orderStatus === 'submitting'} style={{ marginTop: '1rem' }}>
-              {orderStatus === 'submitting' ? 'Placing Order...' : 'Submit Order'}
+          <form className="form-panel form-stack" onSubmit={handleSubmit}>
+            <h2 className="form-heading">Checkout</h2>
+            <input
+              required
+              className="form-input"
+              placeholder="Name"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            />
+            <input
+              required
+              className="form-input"
+              placeholder="Phone or email"
+              value={formData.contact}
+              onChange={(e) => setFormData({ ...formData, contact: e.target.value })}
+            />
+            <input
+              required
+              className="form-input"
+              placeholder="Table or Pickup"
+              value={formData.table}
+              onChange={(e) => setFormData({ ...formData, table: e.target.value })}
+            />
+            <button type="submit" className="btn btn-primary" disabled={orderStatus === 'submitting'}>
+              {orderStatus === 'submitting' ? 'Placing…' : 'Submit Order'}
             </button>
           </form>
         </div>
@@ -79,13 +105,5 @@ function Cart() {
     </div>
   );
 }
-
-const inputStyle = {
-  background: 'var(--color-bg)',
-  border: '1px solid rgba(255,255,255,0.1)',
-  color: 'var(--color-text)',
-  padding: '1rem',
-  fontFamily: 'var(--font-body)'
-};
 
 export default Cart;
