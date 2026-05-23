@@ -12,7 +12,7 @@ const _plane = new THREE.Plane();
 const _hitPoint = new THREE.Vector3();
 const _tapNdc = new THREE.Vector2();
 const _surfaceNormal = new THREE.Vector3(0, 1, 0);
-const _camDir = new THREE.Vector3();
+const _camDir = new THREE.Vector3()
 const _dragRight = new THREE.Vector3();
 const _dragForward = new THREE.Vector3();
 
@@ -36,6 +36,50 @@ let stream = null;
 let running = false;
 let modelFootOffset = 0;
 
+let initialAlphaOffset = null;
+let deviceOrientation = { alpha: 0, beta: 0, gamma: 0 };
+
+function onDeviceOrientation(event) {
+  // Skip if alpha is null, using WebXR, or object is already placed
+  // After placement, we want the camera fixed and only the model rotates
+  if (event.alpha === null || useWebXR || placed) return;
+
+  const alpha = THREE.MathUtils.degToRad(event.alpha); // Z
+  const beta = THREE.MathUtils.degToRad(event.beta);   // X
+  const gamma = THREE.MathUtils.degToRad(event.gamma); // Y
+  const orient = window.orientation ? THREE.MathUtils.degToRad(window.orientation) : 0; // Screen orientation
+
+  if (initialAlphaOffset === null) {
+    initialAlphaOffset = alpha;
+  }
+
+  const relativeAlpha = alpha - initialAlphaOffset;
+
+  const euler = new THREE.Euler();
+  const q0 = new THREE.Quaternion();
+  const q1 = new THREE.Quaternion( - Math.sqrt( 0.5 ), 0, 0, Math.sqrt( 0.5 ) ); // -90 deg around X
+  const zee = new THREE.Vector3( 0, 0, 1 );
+
+  euler.set( beta, relativeAlpha, - gamma, 'YXZ' );
+  camera.quaternion.setFromEuler( euler );
+  camera.quaternion.multiply( q1 );
+  camera.quaternion.multiply( q0.setFromAxisAngle( zee, - orient ) );
+}
+
+
+// Orbit control state for camera
+const orbitState = {
+  spherical: new THREE.Spherical(),
+  target: new THREE.Vector3(),
+  rotateSpeed: 0.5,
+  zoomSpeed: 0.5,
+  minDistance: 0.5,
+  maxDistance: 5,
+  minPolarAngle: 0.1,
+  maxPolarAngle: Math.PI / 2 - 0.1,
+  enabled: false,
+};
+
 const gesture = {
   prev: null,
   scaleFactor: 1,
@@ -47,6 +91,9 @@ const gesture = {
   touchMoved: false,
   pointerId: null,
   lastPointer: { x: 0, y: 0 },
+  startSpread: 0,
+  // Store the world position where the object was placed
+  placedWorldPosition: null,
 };
 
 function isMobileDevice() {
@@ -145,7 +192,7 @@ function attachModelToAnchor() {
   anchor.visible = true;
   placed = true;
   reticle.visible = false;
-  setHint('Drag to move · pinch or scroll to zoom', 'found');
+  setHint('Drag to rotate · Pinch to zoom', 'found');
 }
 
 function applyModelScale() {
@@ -167,23 +214,9 @@ function zoomByFactor(factor) {
 
 /** Drag object along the table plane (screen pixels → world XZ). */
 function moveAnchorOnTable(deltaX, deltaY) {
-  if (!anchor) return;
-  const dist = Math.max(0.4, anchor.position.distanceTo(camera.position));
-  const speed = dist * 0.0028;
-
-  camera.getWorldDirection(_camDir);
-  _dragRight.crossVectors(_camDir, camera.up).normalize();
-  _dragForward.crossVectors(_dragRight, _surfaceNormal).normalize();
-  _dragForward.y = 0;
-  _dragRight.y = 0;
-  if (_dragForward.lengthSq() < 1e-6) _dragForward.set(0, 0, -1);
-  else _dragForward.normalize();
-  if (_dragRight.lengthSq() < 1e-6) _dragRight.set(1, 0, 0);
-  else _dragRight.normalize();
-
-  anchor.position.addScaledVector(_dragRight, deltaX * speed);
-  anchor.position.addScaledVector(_dragForward, -deltaY * speed);
-  markInteracting();
+  // Disabled: do not move the object by dragging/grabbing.
+  void deltaX;
+  void deltaY;
 }
 
 /** Map tap position on screen to estimated depth (lower tap ≈ closer table). */
@@ -213,15 +246,17 @@ function computeSurfaceHit(ndcX, ndcY) {
 }
 
 function alignAnchorToSurface(point, normal) {
-  anchor.position.copy(point);
+  // Store the world position where the object is placed
+  gesture.placedWorldPosition = point.clone();
+  anchor.position.copy(gesture.placedWorldPosition);
   anchor.quaternion.set(0, 0, 0, 1);
   anchor.scale.set(1, 1, 1);
 
   const flatNormal = normal.clone().normalize();
   if (flatNormal.y < 0.15) {
-    anchor.position.copy(point);
+    anchor.position.copy(gesture.placedWorldPosition);
   } else {
-    const toCam = camera.position.clone().sub(point);
+    const toCam = camera.position.clone().sub(gesture.placedWorldPosition);
     toCam.y = 0;
     if (toCam.lengthSq() > 1e-4) {
       anchor.rotation.y = Math.atan2(toCam.x, toCam.z);
@@ -300,7 +335,9 @@ function onTouchStart(ev) {
   if (ev.touches.length > 2) return;
   gesture.touchMoved = false;
   gesture.prev = touchState(ev);
-  if (gesture.prev) gesture.prev.startSpread = gesture.prev.spread;
+  if (gesture.prev && gesture.prev.count >= 2) {
+    gesture.startSpread = gesture.prev.spread;
+  }
   if (!placed && running && !useWebXR && ev.touches.length === 1) {
     const t = ev.touches[0];
     const ndc = ndcFromClient(t.clientX, t.clientY);
@@ -314,27 +351,52 @@ function onTouchMove(ev) {
     gesture.prev = cur;
     return;
   }
+
   if (Math.hypot(cur.rawX - gesture.prev.rawX, cur.rawY - gesture.prev.rawY) > TAP_MOVE_PX) {
     gesture.touchMoved = true;
   }
+
+  // Preview only before first placement.
   if (!placed && running && !useWebXR && cur.count === 1) {
     const ndc = ndcFromClient(cur.rawX, cur.rawY);
     updatePlacementPreview(ndc.x, ndc.y);
   }
 
-  if (!placed || !anchor) {
-    gesture.prev = cur;
-    return;
+  // Single-finger drag rotates the model around Y axis and X axis (like model-viewer)
+  if (placed && cur.count === 1 && gesture.prev.count === 1 && modelMesh) {
+    const deltaX = (cur.rawX - gesture.prev.rawX) * (window.innerWidth + window.innerHeight) / 2;
+    const deltaY = (cur.rawY - gesture.prev.rawY) * (window.innerWidth + window.innerHeight) / 2;
+    const rotationSpeed = 0.005; // Radians per pixel
+    
+    // Rotate model around Y axis (horizontal drag)
+    modelMesh.rotation.y += deltaX * rotationSpeed;
+    
+    // Rotate model around X axis (vertical drag)
+    modelMesh.rotation.x += deltaY * rotationSpeed;
+    
+    // Clamp X rotation to prevent the plate from flipping upside down
+    modelMesh.rotation.x = THREE.MathUtils.clamp(modelMesh.rotation.x, -Math.PI / 3, Math.PI / 3);
+    
+    markInteracting();
   }
 
-  if (cur.count === 1 && gesture.prev.count === 1) {
-    moveAnchorOnTable(cur.rawX - gesture.prev.rawX, cur.rawY - gesture.prev.rawY);
-    ev.preventDefault();
-  }
-
-  if (cur.count >= 2 && gesture.prev.count >= 2 && gesture.prev.startSpread > 0) {
+  // Pinch-to-zoom using robust startSpread tracking.
+  if (cur.count >= 2 && gesture.prev.count >= 2 && gesture.startSpread > 0) {
     const spreadChange = cur.spread - gesture.prev.spread;
-    zoomByFactor(1 + spreadChange / gesture.prev.startSpread);
+    const zoomFactor = 1 + spreadChange / gesture.startSpread;
+    
+    // Zoom the model
+    zoomByFactor(zoomFactor);
+    
+    // Also adjust camera distance for smoother zoom
+    if (orbitState.enabled) {
+      orbitState.spherical.radius = THREE.MathUtils.clamp(
+        orbitState.spherical.radius / zoomFactor,
+        orbitState.minDistance,
+        orbitState.maxDistance
+      );
+    }
+    
     ev.preventDefault();
   }
 
@@ -351,10 +413,12 @@ function onTouchEnd(ev) {
     gesture.prev = null;
     return;
   }
-  if (!placed && !gesture.touchMoved) {
+
+  if (!gesture.touchMoved) {
     onPlaceTap(t.clientX, t.clientY);
     ev.preventDefault();
   }
+
   gesture.prev = null;
   gesture.touchMoved = false;
 }
@@ -374,14 +438,14 @@ function onPointerMove(ev) {
     updatePlacementPreview(ndc.x, ndc.y);
     return;
   }
-  if (!placed || gesture.pointerId !== ev.pointerId) return;
-  if (ev.pointerType === 'touch') return;
-  const dx = ev.clientX - gesture.lastPointer.x;
-  const dy = ev.clientY - gesture.lastPointer.y;
-  if (dx !== 0 || dy !== 0) {
-    moveAnchorOnTable(dx, dy);
+
+  if (placed && gesture.pointerId === ev.pointerId && modelMesh) {
+    const deltaX = ev.clientX - gesture.lastPointer.x;
+    const rotationSpeed = 0.007; // Radians per pixel
+    modelMesh.rotation.y += deltaX * rotationSpeed;
     gesture.lastPointer.x = ev.clientX;
     gesture.lastPointer.y = ev.clientY;
+    markInteracting();
   }
 }
 
@@ -397,14 +461,13 @@ function onPointerUp(ev) {
 }
 
 function onWheel(ev) {
-  if (!placed) return;
+  // Disabled entirely (per requirements).
   ev.preventDefault();
-  zoomByFactor(ev.deltaY > 0 ? 0.9 : 1.1);
 }
 
 function onCanvasClick(ev) {
   if (ev.pointerType === 'touch') return;
-  if (!placed) onPlaceTap(ev.clientX, ev.clientY);
+  onPlaceTap(ev.clientX, ev.clientY);
 }
 
 function setupGestures() {
@@ -472,9 +535,39 @@ function onResize() {
   syncCameraFov();
 }
 
+function updateOrbitControls() {
+  // Only apply orbit controls in non-WebXR mode when object is placed
+  if (useWebXR || !placed || !orbitState.enabled) return;
+  
+  if (!gesture.placedWorldPosition) return;
+  
+  // Set the orbit target to the placed object position
+  orbitState.target.copy(gesture.placedWorldPosition);
+  
+  // Calculate camera position from spherical coordinates
+  // THREE.Spherical: radius, phi (polar angle from +Y), theta (azimuthal angle in XZ plane)
+  const offset = new THREE.Vector3();
+  offset.setFromSpherical(orbitState.spherical);
+  
+  // Update camera position
+  camera.position.copy(orbitState.target).add(offset);
+  camera.lookAt(orbitState.target);
+}
+
+function initOrbitFromCamera() {
+  // Initialize orbit state based on current camera position relative to the placed object
+  if (!gesture.placedWorldPosition) return;
+  
+  const offset = new THREE.Vector3().subVectors(camera.position, gesture.placedWorldPosition);
+  orbitState.spherical.setFromVector3(offset);
+  orbitState.target.copy(gesture.placedWorldPosition);
+  orbitState.enabled = true;
+}
+
 function updateAutoRotate(dt) {
-  if (!placed || !anchor || gesture.userInteracting) return;
-  anchor.rotation.y += AUTO_ROTATE_SPEED * dt;
+  // Intentionally disabled to keep the object fixed relative to the world.
+  // Zoom is still handled by scaling the model.
+  void dt;
 }
 
 function renderFrame(_t, frame) {
@@ -617,8 +710,31 @@ async function startCameraFallback() {
   loop();
 }
 
+async function requestDeviceOrientationPermission() {
+  if (
+    typeof DeviceOrientationEvent !== 'undefined' &&
+    typeof DeviceOrientationEvent.requestPermission === 'function'
+  ) {
+    try {
+      const permissionState = await DeviceOrientationEvent.requestPermission();
+      if (permissionState === 'granted') {
+        window.addEventListener('deviceorientation', onDeviceOrientation, true);
+        console.log('[AR] Gyroscope permission granted');
+      } else {
+        console.warn('[AR] Gyroscope permission denied');
+      }
+    } catch (err) {
+      console.error('[AR] Error requesting gyroscope permission:', err);
+    }
+  } else {
+    window.addEventListener('deviceorientation', onDeviceOrientation, true);
+  }
+}
+
 async function startAR() {
   if (running) return;
+
+  await requestDeviceOrientationPermission();
 
   if (!window.isSecureContext) {
     const fixUrl = isLocalhost()
