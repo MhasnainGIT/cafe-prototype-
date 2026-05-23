@@ -40,9 +40,10 @@ let initialAlphaOffset = null;
 let deviceOrientation = { alpha: 0, beta: 0, gamma: 0 };
 
 function onDeviceOrientation(event) {
-  // Skip if alpha is null, using WebXR, or object is already placed
-  // After placement, we want the camera fixed and only the model rotates
+  // Skip if alpha is null, using WebXR, or (after placement) to keep the camera from re-orienting.
+  // This prevents the model from feeling like it’s attached to the screen.
   if (event.alpha === null || useWebXR || placed) return;
+
 
   const alpha = THREE.MathUtils.degToRad(event.alpha); // Z
   const beta = THREE.MathUtils.degToRad(event.beta);   // X
@@ -699,8 +700,11 @@ async function startCameraFallback() {
 
   syncCameraFov();
   reticle.visible = true;
-  setHint('Tap the table to place · then drag to move, pinch to zoom');
+  // In fallback mode (no WebXR hit-test), we still must keep the model at a fixed world anchor.
+  // Disable device-orientation camera updates after placement to prevent “screen-space attached” feel.
+  setHint('Tap the table to place · then rotate and pinch to zoom');
   running = true;
+
 
   function loop() {
     if (!running) return;
