@@ -86,8 +86,8 @@ const gesture = {
   prev: null,
   scaleFactor: 1,
   baseScale: 1,
-  minScale: 0.25,
-  maxScale: 4,
+  minScale: 0.1,
+  maxScale: 10,
   userInteracting: false,
   idleTimer: null,
   touchMoved: false,
@@ -366,15 +366,23 @@ function onTouchMove(ev) {
     updatePlacementPreview(ndc.x, ndc.y);
   }
 
-  // Single-finger drag rotates the model (like model-viewer turntable).
+  // Single-finger drag: orbit-style rotation matching <model-viewer camera-controls>.
   if (placed && cur.count === 1 && gesture.prev.count === 1 && modelMesh) {
     const deltaX = cur.rawX - gesture.prev.rawX; // pixels
     const deltaY = cur.rawY - gesture.prev.rawY;
     const rotationSpeed = 0.006;
 
-    modelMesh.rotation.y += deltaX * rotationSpeed;
-    modelMesh.rotation.x += deltaY * rotationSpeed;
-    modelMesh.rotation.x = THREE.MathUtils.clamp(modelMesh.rotation.x, -Math.PI / 4, Math.PI / 4);
+    // Horizontal drag → turntable rotation around world Y (unlimited 360°)
+    const qY = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0), deltaX * rotationSpeed
+    );
+    // Vertical drag → tilt around camera-relative X axis
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(modelMesh.quaternion);
+    const qX = new THREE.Quaternion().setFromAxisAngle(right, deltaY * rotationSpeed);
+
+    modelMesh.quaternion.premultiply(qY);
+    modelMesh.quaternion.premultiply(qX);
+    modelMesh.quaternion.normalize();
 
     ev.preventDefault();
     markInteracting();
@@ -441,8 +449,20 @@ function onPointerMove(ev) {
 
   if (placed && gesture.pointerId === ev.pointerId && modelMesh) {
     const deltaX = ev.clientX - gesture.lastPointer.x;
-    const rotationSpeed = 0.007; // Radians per pixel
-    modelMesh.rotation.y += deltaX * rotationSpeed;
+    const deltaY = ev.clientY - gesture.lastPointer.y;
+    const rotationSpeed = 0.007;
+
+    // Same orbit-style rotation as touch: Y turntable + X tilt
+    const qY = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0), deltaX * rotationSpeed
+    );
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(modelMesh.quaternion);
+    const qX = new THREE.Quaternion().setFromAxisAngle(right, deltaY * rotationSpeed);
+
+    modelMesh.quaternion.premultiply(qY);
+    modelMesh.quaternion.premultiply(qX);
+    modelMesh.quaternion.normalize();
+
     gesture.lastPointer.x = ev.clientX;
     gesture.lastPointer.y = ev.clientY;
     markInteracting();
@@ -461,8 +481,10 @@ function onPointerUp(ev) {
 }
 
 function onWheel(ev) {
-  // Disabled entirely (per requirements).
   ev.preventDefault();
+  if (!placed || !modelMesh) return;
+  const factor = ev.deltaY > 0 ? 0.92 : 1.08;
+  zoomByFactor(factor);
 }
 
 function onCanvasClick(ev) {
