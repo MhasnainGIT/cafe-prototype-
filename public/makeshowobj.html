@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>AR Object Always Visible</title>
+    <meta charset="utf-8">
+    <script src="https://aframe.io/releases/1.0.4/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+  </head>
+  <body>
+    <a-scene 
+      arjs="detectionMode: mono; matrixCodeType: 3x3;"
+      embedded 
+      renderer="logarithmicDepthBuffer: true;"
+    >
+      <a-assets>
+        <a-asset-item 
+          id="model" 
+          src="https://cdn.glitch.global/addb5fe7-d705-44fd-a613-f856c9627bf6/donut2.glb"
+        ></a-asset-item>
+      </a-assets>
+
+      <a-entity 
+        gltf-model="#model" 
+        scale="5 5 5" 
+        position="0 0 0"
+      ></a-entity>
+
+      <a-entity camera></a-entity>
+    </a-scene>
+  </body>
+</html>
+

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple SLAM AR with Gestures</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+    <script>
+        // Gesture Detector Component
+        AFRAME.registerComponent('gesture-detector', {
+            schema: {
+                element: { default: '' }
+            },
+            init: function() {
+                this.targetElement = this.data.element && document.querySelector(this.data.element);
+                if (!this.targetElement) {
+                    this.targetElement = this.el;
+                }
+
+                this.internalState = {
+                    previousState: null
+                };
+
+                this.emitGestureEvent = this.emitGestureEvent.bind(this);
+                this.targetElement.addEventListener('touchstart', this.emitGestureEvent);
+                this.targetElement.addEventListener('touchend', this.emitGestureEvent);
+                this.targetElement.addEventListener('touchmove', this.emitGestureEvent);
+            },
+            
+            emitGestureEvent(event) {
+                const currentState = this.getTouchState(event);
+                const previousState = this.internalState.previousState;
+
+                const gestureContinues = previousState && currentState && 
+                    currentState.touchCount === previousState.touchCount;
+
+                const gestureEnded = previousState && !currentState;
+                const gestureStarted = currentState && !previousState;
+
+                if (gestureEnded) {
+                    this.el.emit('gestureended', previousState);
+                    this.internalState.previousState = null;
+                }
+                if (gestureStarted) {
+                    this.el.emit('gesturestarted', currentState);
+                }
+                if (gestureContinues) {
+                    this.el.emit('gesturemoved', currentState);
+                }
+
+                this.internalState.previousState = currentState;
+            },
+            
+            getTouchState(event) {
+                if (event.touches.length === 0) return null;
+
+                const touchList = [];
+                for (let i = 0; i < event.touches.length; i++) {
+                    touchList.push(event.touches[i]);
+                }
+                
+                return {
+                    touchCount: touchList.length,
+                    touches: touchList
+                };
+            }
+        });
+
+        // Gesture Handler Component
+        AFRAME.registerComponent('gesture-handler', {
+            schema: {
+                enabled: { default: true },
+                rotationFactor: { default: 5 },
+                minScale: { default: 0.3 },
+                maxScale: { default: 8 }
+            },
+
+            init: function() {
+                this.handleScale = this.handleScale.bind(this);
+                this.handleRotation = this.handleRotation.bind(this);
+
+                this.isVisible = false;
+                this.initialScale = this.el.object3D.scale.clone();
+                this.scaleFactor = 1;
+
+                this.el.sceneEl.addEventListener('gesturestarted', this.handleScale);
+                this.el.sceneEl.addEventListener('gesturemoved', this.handleScale);
+                this.el.sceneEl.addEventListener('gesturemoved', this.handleRotation);
+            },
+
+            handleScale: function(event) {
+                if (event.detail.touchCount === 2) {
+                    const touchPoints = event.detail.touches;
+                    const dx = touchPoints[0].pageX - touchPoints[1].pageX;
+                    const dy = touchPoints[0].pageY - touchPoints[1].pageY;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (this.previousDistance === undefined) {
+                        this.previousDistance = distance;
+                    }
+
+                    const scaleFactor = distance / this.previousDistance;
+                    this.scaleFactor *= scaleFactor;
+                    this.scaleFactor = Math.min(Math.max(this.scaleFactor, this.data.minScale), this.data.maxScale);
+
+                    this.el.object3D.scale.copy(this.initialScale.multiplyScalar(this.scaleFactor));
+                    this.previousDistance = distance;
+                }
+            },
+
+            handleRotation: function(event) {
+                if (event.detail.touchCount === 1) {
+                    const touch = event.detail.touches[0];
+                    
+                    if (this.previousTouch === undefined) {
+                        this.previousTouch = touch;
+                    }
+
+                    const deltaX = touch.pageX - this.previousTouch.pageX;
+                    this.el.object3D.rotation.y += deltaX * this.data.rotationFactor * 0.01;
+                    
+                    this.previousTouch = touch;
+                }
+            },
+
+            remove: function() {
+                this.el.sceneEl.removeEventListener('gesturestarted', this.handleScale);
+                this.el.sceneEl.removeEventListener('gesturemoved', this.handleScale);
+                this.el.sceneEl.removeEventListener('gesturemoved', this.handleRotation);
+            }
+        });
+    </script>
+</head>
+<body style="margin: 0; overflow: hidden;">
+    <div style="position: fixed; top: 10px; width: 100%; text-align: center; z-index: 100; color: white; background: rgba(0,0,0,0.5); padding: 5px;">
+        Tap to place<br>One finger: rotate | Two fingers: scale
+    </div>
+
+    <a-scene
+        embedded
+        arjs="sourceType: webcam; debugUIEnabled: false; detectionMode: mono_and_matrix; matrixCodeType: 3x3;"
+        renderer="logarithmicDepthBuffer: true;"
+        vr-mode-ui="enabled: false"
+        gesture-detector>
+        
+        <a-assets>
+            <a-asset-item
+                id="model"
+                src="Sushi_Platter.glb"
+            ></a-asset-item>
+        </a-assets>
+
+        <a-entity
+            id="model-container"
+            gltf-model="#model"
+            position="0 0 -2"
+            scale="5 5 5"
+            gesture-handler
+            class="clickable">
+        </a-entity>
+
+        <a-entity camera></a-entity>
+    </a-scene>
+</body>
+</html>

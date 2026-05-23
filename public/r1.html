@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Markerless AR with Gestures</title>
+    <script src="https://aframe.io/releases/1.0.4/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+    <script src="gesture-detector.js"></script>
+    <script src="gesture-handler-2.js"></script>
+  </head>
+
+  <body>
+    <a-scene
+      vr-mode-ui="enabled: false"
+      arjs="sourceType: webcam; detectionMode: mono;"
+      gesture-detector
+      renderer="logarithmicDepthBuffer: true;"
+      embedded
+    >
+      <a-assets>
+        <a-asset-item 
+          id="donut" 
+          src="https://cdn.glitch.global/addb5fe7-d705-44fd-a613-f856c9627bf6/donut2.glb">
+        </a-asset-item>
+      </a-assets>
+
+      <!-- Hit-test target for surface detection -->
+      <a-entity 
+        id="hit-result"
+        ar-hit-test="target: #hit-result; type: click;"
+        position="0 0 0"
+        visible="false"
+      ></a-entity>
+
+      <!-- AR Model with gesture controls -->
+      <a-entity
+        id="donut-model"
+        gltf-model="#donut"
+        scale="5 5 5"
+        class="clickable"
+        gesture-handler
+        visible="false"
+      ></a-entity>
+
+      <a-entity camera></a-entity>
+    </a-scene>
+
+    <script>
+      let modelPlaced = false;
+      
+      // Place model on surface tap
+      document.addEventListener('ar-hit-test-select', (evt) => {
+        if(!modelPlaced) {
+          const model = document.querySelector('#donut-model');
+          model.setAttribute('position', evt.detail.position);
+          model.setAttribute('visible', 'true');
+          modelPlaced = true;
+        }
+      });
+    </script>
+  </body>
+</html>
+

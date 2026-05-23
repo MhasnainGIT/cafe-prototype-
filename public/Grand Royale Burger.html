@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Grand Royale Burger - AR View</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <script src="https://aframe.io/releases/1.0.4/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.8/aframe/build/aframe-ar.js"></script>
+    <script src="/gesture-detector.js"></script>
+    <script src="/gesture-handler-2.js"></script>
+    <script src="/ar-model-loader.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <style>
+      html, body { margin: 0; overflow: hidden; width: 100%; height: 100%; background: #000; }
+      .close-button, .nav-button, .info-button {
+        position: fixed; background: rgba(0,0,0,0.65); color: #fff; border: none;
+        border-radius: 50%; cursor: pointer; z-index: 99999;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .close-button { top: 20px; left: 20px; width: 40px; height: 40px; }
+      .prev-button { left: 20px; top: 50%; transform: translateY(-50%); width: 50px; height: 50px; font-size: 22px; }
+      .next-button { right: 20px; top: 50%; transform: translateY(-50%); width: 50px; height: 50px; font-size: 22px; }
+      .info-button { top: 20px; right: 20px; width: 40px; height: 40px; }
+      .food-info {
+        position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+        background: rgba(0,0,0,0.6); color: #fff; padding: 10px 20px; border-radius: 10px;
+        font-family: Arial, sans-serif; text-align: center; width: 85%; z-index: 99999; pointer-events: none;
+      }
+      .calorie-info {
+        position: fixed; top: 70px; right: 20px; background: rgba(0,0,0,0.7); color: #fff;
+        padding: 10px; border-radius: 10px; font-size: 14px; z-index: 99999; display: none;
+      }
+      .calorie-info.show { display: block; }
+    </style>
+  </head>
+  <body>
+    <a-scene
+      arjs="sourceType: webcam; debugUIEnabled: false;"
+      embedded
+      vr-mode-ui="enabled: false"
+      loading-screen="enabled: false"
+      gesture-detector
+      renderer="alpha: true; antialias: true; logarithmicDepthBuffer: true;"
+      id="scene"
+    >
+      <a-marker type="pattern" url="/pattern-webhaze_logo_6.patt" raycaster="objects: .clickable" emitevents="true" cursor="fuse: false; rayOrigin: mouse;" id="markerA">
+        <a-light type="ambient" color="#ffffff" intensity="1.15"></a-light>
+        <a-light type="directional" color="#ffffff" intensity="0.75" position="0 1 1"></a-light>
+        <a-entity
+          class="clickable"
+          ar-gltf-model="src: /models/Sushi_Platter.glb; position: 0 0 0"
+          ar-auto-rotate="speed: 12"
+          gesture-handler="minScale: 0.5; maxScale: 6; rotationFactor: 4"
+        ></a-entity>
+      </a-marker>
+      <a-entity camera></a-entity>
+    </a-scene>
+
+    <div class="food-info">
+      <div style="font-size:22px;font-weight:bold;">Grand Royale Burger</div>
+      <div>Point at Webhaze logo marker · pinch & drag on model</div>
+    </div>
+    <button class="nav-button prev-button" onclick="location.href='/Crispy Royale Platter.html'"><i class="fas fa-arrow-left"></i></button>
+    <button class="close-button" onclick="history.back()||window.close()"><i class="fas fa-times"></i></button>
+    <button class="nav-button next-button" onclick="location.href='/Imperial Truffle Pizza.html'"><i class="fas fa-arrow-right"></i></button>
+    <button class="info-button" onclick="document.getElementById('calorieInfo').classList.toggle('show')"><i class="fas fa-info"></i></button>
+    <div class="calorie-info" id="calorieInfo"><p>280 kcal · 22g protein</p></div>
+
+    <script>
+      (function () {
+        var scene = document.getElementById('scene');
+        function fixLayers() {
+          document.querySelectorAll('video').forEach(function (v) {
+            Object.assign(v.style, { position: 'fixed', top: '0', left: '0', width: '100%', height: '100%', objectFit: 'cover', zIndex: '1' });
+          });
+          var c = scene.querySelector('canvas');
+          if (c) Object.assign(c.style, { position: 'fixed', top: '0', left: '0', width: '100%', height: '100%', zIndex: '2', background: 'transparent' });
+          if (scene.renderer) scene.renderer.setClearColor(0x000000, 0);
+        }
+        scene.addEventListener('loaded', function () { fixLayers(); setInterval(fixLayers, 1000); });
+      })();
+    </script>
+  </body>
+</html>

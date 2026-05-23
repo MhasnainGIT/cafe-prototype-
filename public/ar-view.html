@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Flynn Cafe - AR</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <link rel="stylesheet" href="/ar-view.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="ar-container">
+      <video id="ar-video" autoplay muted playsinline webkit-playsinline></video>
+      <canvas id="ar-canvas"></canvas>
+    </div>
+    <button type="button" id="close-btn" aria-label="Close">✕</button>
+    <button type="button" id="start-ar-btn">Start camera</button>
+    <p id="hint">Tap Start, then tap a table or surface to place the dish</p>
+    <script>
+      document.getElementById('close-btn').addEventListener('click', function () {
+        if (window.history.length > 1) window.history.back();
+        else window.close();
+      });
+    </script>
+    <script type="module" src="/ar-tap-place.js"></script>
+  </body>
+</html>

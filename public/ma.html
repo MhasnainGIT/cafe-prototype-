@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR.js with SLAM and Gesture Interactions</title>
+    <link rel="stylesheet" href="styles.css">
+    
+    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+    <script src="https://cdn.rawgit.com/alanross/AlvaAR/master/dist/alvaar.js"></script>
+    <script src="gesture-detector.js"></script>
+    <script src="gesture-handler-2.js"></script>
+</head>
+
+<body style="margin: 0; overflow: hidden;">
+    <a-scene
+      arjs='sourceType: webcam;'
+      embedded
+      renderer="logarithmicDepthBuffer: true;"
+      vr-mode-ui="enabled: false"
+      gesture-detector
+      id="scene"
+    >
+        <a-assets>
+            <a-asset-item
+              id="bowser"
+              src="https://cdn.glitch.global/addb5fe7-d705-44fd-a613-f856c9627bf6/donut2.glb"
+            ></a-asset-item>
+        </a-assets>
+
+        <!-- Replace the marker with a generic entity for SLAM -->
+        <a-entity id="bowser-model" gltf-model="#bowser" position="0 0 0" scale="0.1 0.1 0.1" class="clickable" gesture-handler></a-entity>
+
+        <!-- Camera Entity -->
+        <a-entity camera></a-entity>
+    </a-scene>
+
+    <script>
+        // Initialize AlvaAR for SLAM
+        const alvaAR = new AlvaAR({
+            sourceType: 'webcam',  // Use webcam as input
+            debug: true,  // Enable debugging if necessary
+        });
+
+        // Start SLAM processing
+        alvaAR.start();
+
+        // Update the position of the model based on SLAM data
+        function updatePosition() {
+            const pose = alvaAR.getPose(); // Get the current pose from AlvaAR
+            if (pose) {
+                const model = document.getElementById('bowser-model');
+                model.object3D.position.set(pose.position.x, pose.position.y, pose.position.z);
+                model.object3D.rotation.set(pose.rotation.x, pose.rotation.y, pose.rotation.z);
+            }
+            requestAnimationFrame(updatePosition);
+        }
+
+        // Start updating the position of the model
+        updatePosition();
+    </script>
+</body>
+</html>
+

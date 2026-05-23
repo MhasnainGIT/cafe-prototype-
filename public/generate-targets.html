@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Generate AR Targets</title>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image.prod.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 30px; background: #111; color: white; }
+    h1 { color: #c9a84c; margin-bottom: 20px; }
+    .card { background: #1c1c1c; border: 1px solid #333; border-radius: 12px; padding: 20px; margin-bottom: 20px; max-width: 500px; }
+    label { display: block; margin-bottom: 8px; font-size: 14px; color: #aaa; }
+    input[type=file] { color: white; margin-bottom: 12px; }
+    button { background: #c9a84c; color: #111; border: none; padding: 10px 24px; border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 14px; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    #status { margin-top: 12px; font-size: 13px; color: #aaa; }
+    .done { color: #4caf50 !important; }
+    .instructions { background: #1a1a2e; border: 1px solid #c9a84c44; border-radius: 12px; padding: 20px; max-width: 500px; margin-bottom: 24px; }
+    .instructions ol { padding-left: 20px; line-height: 2; font-size: 14px; color: #ccc; }
+    code { background: #333; padding: 2px 6px; border-radius: 4px; font-size: 12px; color: #c9a84c; }
+  </style>
+</head>
+<body>
+  <h1>🎯 Generate MindAR Targets</h1>
+
+  <div class="instructions">
+    <p style="margin-bottom:12px;color:#c9a84c;font-weight:600;">How to use:</p>
+    <ol>
+      <li>Pick a dish image (burger, pizza, platter photo)</li>
+      <li>Click <strong>Generate .mind file</strong></li>
+      <li>Download the file and save it to <code>public/targets/</code></li>
+      <li>Name it: <code>burger.mind</code>, <code>pizza.mind</code>, <code>platter.mind</code></li>
+      <li>In AR, point camera at the <strong>same dish image</strong> to trigger the 3D model</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <label>Select dish image (burger, pizza, platter etc.)</label>
+    <input type="file" id="imgInput" accept="image/*">
+    <br>
+    <label>Output filename:</label>
+    <input type="text" id="filename" value="burger" style="background:#333;border:1px solid #555;color:white;padding:6px 10px;border-radius:6px;width:200px;margin-bottom:12px;">
+    <br>
+    <button id="compileBtn" onclick="compile()">Generate .mind file</button>
+    <div id="status"></div>
+  </div>
+
+  <script>
+    async function compile() {
+      const file = document.getElementById('imgInput').files[0];
+      if (!file) { alert('Please select an image first'); return; }
+
+      const btn = document.getElementById('compileBtn');
+      const status = document.getElementById('status');
+      btn.disabled = true;
+      status.textContent = 'Processing... this may take 10-30 seconds';
+
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+      await new Promise(r => img.onload = r);
+
+      try {
+        const compiler = new MINDAR.IMAGE.Compiler();
+        await compiler.compileImageTargets([img], (progress) => {
+          status.textContent = `Processing: ${Math.round(progress * 100)}%`;
+        });
+
+        const buffer = await compiler.exportData();
+        const blob = new Blob([buffer]);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const name = document.getElementById('filename').value || 'target';
+        a.href = url;
+        a.download = name + '.mind';
+        a.click();
+
+        status.textContent = '✅ Done! Save the downloaded file to public/targets/';
+        status.className = 'done';
+      } catch(e) {
+        status.textContent = 'Error: ' + e.message;
+      }
+      btn.disabled = false;
+    }
+  </script>
+</body>
+</html>

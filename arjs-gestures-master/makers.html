@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto-start WebXR AR</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; }
+    </style>
+</head>
+<body>
+    <script>
+        // Initialize Three.js
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // Add a simple cube as test object
+        const geometry = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+        const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+        const cube = new THREE.Mesh(geometry, material);
+        cube.position.z = -0.5;
+        scene.add(cube);
+
+        // Add light
+        const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+        scene.add(light);
+
+        // Auto-start AR
+        async function startAR() {
+            try {
+                // Request AR session
+                const session = await navigator.xr.requestSession('immersive-ar', {
+                    requiredFeatures: ['local']
+                });
+
+                // Set up WebGL layer
+                await renderer.xr.setSession(session);
+
+                // Get reference space
+                const refSpace = await session.requestReferenceSpace('local');
+
+                // Animation loop
+                renderer.setAnimationLoop((timestamp, frame) => {
+                    if (frame) {
+                        const pose = frame.getViewerPose(refSpace);
+                        if (pose) {
+                            cube.rotation.x += 0.01;
+                            cube.rotation.y += 0.01;
+                            renderer.render(scene, camera);
+                        }
+                    }
+                });
+
+                // Handle session end
+                session.addEventListener('end', () => {
+                    renderer.setAnimationLoop(null);
+                });
+
+            } catch (error) {
+                console.error('Error starting AR:', error);
+            }
+        }
+
+        // Start AR as soon as the page loads
+        window.addEventListener('load', () => {
+            if (navigator.xr) {
+                navigator.xr.isSessionSupported('immersive-ar')
+                    .then((supported) => {
+                        if (supported) {
+                            startAR();
+                        } else {
+                            console.error('AR not supported on this device');
+                        }
+                    });
+            } else {
+                console.error('WebXR not available');
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1, user-scalable=no'>
+    <meta name='mobile-web-app-capable' content='yes'>
+    <meta name='apple-mobile-web-app-capable' content='yes'>
+    <title>SLAM-based AR Interaction</title>
+    <style>
+        body {
+            margin: 0;
+        }
+        canvas {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        header {
+            position: absolute;
+            z-index: 999;
+            padding: 1em;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div id="xr-button"></div>
+    </header>
+    <script type="module">
+        // Check if WebXR is available
+        if (!navigator.xr) {
+            alert("WebXR not available in your browser. Please try a compatible browser.");
+        }
+
+        // Initialize Three.js
+        import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js';
+        import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/loaders/GLTFLoader.js';
+
+        let xrButton = document.getElementById('xr-button');
+        let xrSession = null;
+        let xrRefSpace = null;
+        let gl = null;
+        let renderer = null;
+        let scene = null;
+        let camera = null;
+        let model = null;
+
+        // Set up the scene
+        function initScene() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+
+            // Add lights
+            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+            scene.add(light);
+
+            // Load the 3D model
+            const loader = new GLTFLoader();
+            loader.load('https://cdn.glitch.global/addb5fe7-d705-44fd-a613-f856c9627bf6/donut2.glb', 
+                (gltf) => {
+                    model = gltf.scene;
+                    model.scale.set(0.5, 0.5, 0.5);
+                    model.position.set(0, 0, -1);
+                    scene.add(model);
+                }
+            );
+
+            // Set up renderer
+            renderer = new THREE.WebGLRenderer({
+                alpha: true,
+                preserveDrawingBuffer: true,
+                antialias: true,
+                xrCompatible: true
+            });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+        }
+
+        // Initialize AR session
+        async function initAR() {
+            try {
+                if (!xrSession) {
+                    xrSession = await navigator.xr.requestSession('immersive-ar', {
+                        requiredFeatures: ['local', 'hit-test']
+                    });
+                    
+                    // Set up WebGL context
+                    gl = renderer.getContext();
+                    xrSession.updateRenderState({
+                        baseLayer: new XRWebGLLayer(xrSession, gl)
+                    });
+
+                    // Get reference space
+                    xrRefSpace = await xrSession.requestReferenceSpace('local');
+                    
+                    // Start rendering
+                    xrSession.requestAnimationFrame(onXRFrame);
+                    
+                    // Add session end handler
+                    xrSession.addEventListener('end', onSessionEnd);
+                }
+            } catch (error) {
+                console.error('Failed to initialize AR session:', error);
+            }
+        }
+
+        // Handle XR animation frame
+        function onXRFrame(time, frame) {
+            if (!xrSession) return;
+
+            xrSession.requestAnimationFrame(onXRFrame);
+            
+            const pose = frame.getViewerPose(xrRefSpace);
+            if (pose) {
+                const view = pose.views[0];
+                const viewport = xrSession.renderState.baseLayer.getViewport(view);
+                renderer.setSize(viewport.width, viewport.height);
+                
+                camera.matrix.fromArray(view.transform.matrix);
+                camera.projectionMatrix.fromArray(view.projectionMatrix);
+                camera.updateMatrixWorld(true);
+                
+                renderer.render(scene, camera);
+            }
+        }
+
+        // Handle session end
+        function onSessionEnd() {
+            xrSession = null;
+        }
+
+        // Initialize gesture handling
+        function initGestures() {
+            let startX, startY;
+            let isDragging = false;
+
+            renderer.domElement.addEventListener('touchstart', (e) => {
+                startX = e.touches[0].pageX;
+                startY = e.touches[0].pageY;
+                isDragging = true;
+            });
+
+            renderer.domElement.addEventListener('touchmove', (e) => {
+                if (!isDragging || !model) return;
+                
+                const deltaX = e.touches[0].pageX - startX;
+                const deltaY = e.touches[0].pageY - startY;
+                
+                model.rotation.y += deltaX * 0.01;
+                model.rotation.x += deltaY * 0.01;
+                
+                startX = e.touches[0].pageX;
+                startY = e.touches[0].pageY;
+            });
+
+            renderer.domElement.addEventListener('touchend', () => {
+                isDragging = false;
+            });
+        }
+
+        // Create AR button
+        function createARButton() {
+            const button = document.createElement('button');
+            button.style.padding = '12px 24px';
+            button.style.border = 'none';
+            button.style.borderRadius = '4px';
+            button.style.background = '#fff';
+            button.style.color = '#000';
+            button.style.font = 'bold 13px sans-serif';
+            button.textContent = 'START AR';
+
+            button.addEventListener('click', () => {
+                initAR();
+            });
+
+            xr-button.appendChild(button);
+        }
+
+        // Initialize everything
+        initScene();
+        createARButton();
+        initGestures();
+    </script>
+</body>
+</html>
+

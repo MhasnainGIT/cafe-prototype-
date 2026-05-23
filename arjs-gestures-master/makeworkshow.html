@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>AR Scene</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/aframe/1.4.2/aframe.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/aframe-extras/7.0.0/aframe-extras.min.js"></script>
+    <script>
+        // Check if WebXR is supported
+        if (navigator.xr) {
+            navigator.xr.isSessionSupported('immersive-ar')
+                .then((supported) => {
+                    if (!supported) {
+                        document.getElementById('overlay').innerHTML = 'AR not supported on this device';
+                    }
+                });
+        } else {
+            document.getElementById('overlay').innerHTML = 'WebXR not supported on this device';
+        }
+
+        AFRAME.registerComponent('ar-session', {
+            init: function() {
+                // Only enter AR mode, disable VR
+                this.el.sceneEl.setAttribute('vr-mode-ui', {enabled: false});
+                
+                // Start AR session when scene loads
+                this.el.sceneEl.addEventListener('loaded', () => {
+                    if (!AFRAME.utils.device.isMobile()) {
+                        document.getElementById('overlay').innerHTML = 'Please open on a mobile device';
+                        return;
+                    }
+                    
+                    // Request camera permission explicitly
+                    navigator.mediaDevices.getUserMedia({video: true})
+                        .then(() => {
+                            this.el.sceneEl.enterAR();
+                        })
+                        .catch((err) => {
+                            document.getElementById('overlay').innerHTML = 'Camera permission denied. Please allow camera access.';
+                        });
+                });
+            }
+        });
+
+        // Surface detection and model placement
+        AFRAME.registerComponent('surface-tracking', {
+            init: function() {
+                this.raycaster = new THREE.Raycaster();
+                this.camera = document.querySelector('a-camera').object3D;
+                this.model = document.querySelector('#ar-model');
+                
+                this.el.sceneEl.addEventListener('enter-vr', () => {
+                    if (this.el.sceneEl.is('ar-mode')) {
+                        document.getElementById('overlay').innerHTML = 'Looking for surface...';
+                    }
+                });
+
+                this.el.addEventListener('click', (evt) => {
+                    const position = this.el.getAttribute('position');
+                    if (position) {
+                        this.model.setAttribute('position', position);
+                        this.model.setAttribute('visible', true);
+                        document.getElementById('overlay').innerHTML = 'Model placed!<br>• Drag to move<br>• Pinch to scale<br>• Two fingers to rotate';
+                    }
+                });
+            },
+
+            tick: function() {
+                if (!this.el.sceneEl.is('ar-mode')) return;
+                
+                this.raycaster.setFromCamera({x: 0, y: 0}, this.camera);
+                const intersects = this.raycaster.intersectObjects(this.el.sceneEl.object3D.children, true);
+                
+                if (intersects.length > 0) {
+                    this.el.setAttribute('position', intersects[0].point);
+                    this.el.setAttribute('visible', true);
+                } else {
+                    this.el.setAttribute('visible', false);
+                }
+            }
+        });
+
+        // Model manipulation controls remain the same as before
+        AFRAME.registerComponent('model-controls', {
+            init: function() {
+                this.touchStarted = false;
+                this.touchCount = 0;
+                this.previousPosition = new THREE.Vector2();
+                
+                this.el.addEventListener('touchstart', this.onTouchStart.bind(this));
+                this.el.addEventListener('touchmove', this.onTouchMove.bind(this));
+                this.el.addEventListener('touchend', this.onTouchEnd.bind(this));
+            },
+
+            onTouchStart: function(evt) {
+                this.touchStarted = true;
+                this.touchCount = evt.touches.length;
+                if (evt.touches.length === 1) {
+                    this.previousPosition.set(evt.touches[0].pageX, evt.touches[0].pageY);
+                }
+            },
+
+            onTouchMove: function(evt) {
+                if (!this.touchStarted) return;
+
+                if (evt.touches.length === 1) {
+                    // Move
+                    const touch = evt.touches[0];
+                    const deltaX = touch.pageX - this.previousPosition.x;
+                    const deltaY = touch.pageY - this.previousPosition.y;
+                    
+                    const position = this.el.getAttribute('position');
+                    this.el.setAttribute('position', {
+                        x: position.x + deltaX * 0.01,
+                        y: position.y,
+                        z: position.z + deltaY * 0.01
+                    });
+                    
+                    this.previousPosition.set(touch.pageX, touch.pageY);
+                } else if (evt.touches.length === 2) {
+                    // Scale and rotate
+                    const touch1 = evt.touches[0];
+                    const touch2 = evt.touches[1];
+                    const dist = Math.hypot(
+                        touch1.pageX - touch2.pageX,
+                        touch1.pageY - touch2.pageY
+                    );
+                    
+                    if (this.previousDist) {
+                        const scale = this.el.getAttribute('scale');
+                        const scaleFactor = dist / this.previousDist;
+                        const newScale = Math.min(Math.max(scale.x * scaleFactor, 0.5), 5);
+                        this.el.setAttribute('scale', {x: newScale, y: newScale, z: newScale});
+                    }
+                    this.previousDist = dist;
+                }
+            },
+
+            onTouchEnd: function() {
+                this.touchStarted = false;
+                this.previousDist = null;
+            }
+        });
+    </script>
+    <style>
+        #overlay {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            font-family: Arial, sans-serif;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="overlay">Starting AR...</div>
+    
+    <a-scene 
+        ar-session
+        webxr="requiredFeatures: hit-test; overlayElement: #overlay;"
+        renderer="colorManagement: true"
+        vr-mode-ui="enabled: false">
+        
+        <a-assets>
+            <a-asset-item id="model" src="Sushi_Platter.glb"></a-asset-item>
+        </a-assets>
+
+        <a-camera position="0 1.6 0"></a-camera>
+        
+        <a-entity
+            id="surface-indicator"
+            surface-tracking
+            geometry="primitive: ring; radiusInner: 0.04; radiusOuter: 0.05"
+            material="color: #FF4081; shader: flat"
+            rotation="-90 0 0"
+            visible="false">
+        </a-entity>
+
+        <a-entity
+            id="ar-model"
+            gltf-model="#model"
+            model-controls
+            scale="1 1 1"
+            visible="false">
+        </a-entity>
+
+        <a-entity light="type: ambient; intensity: 0.5"></a-entity>
+        <a-entity light="type: directional; intensity: 0.8" position="-1 1 0"></a-entity>
+    </a-scene>
+</body>
+</html>

@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Imperial Truffle Pizza - AR</title>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000 !important; } video { z-index: 0 !important; } .mindar-ui-overlay { background: transparent !important; }
+    video { position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; object-fit: cover !important; z-index: 0 !important; }
+    canvas, .a-canvas { position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; background: transparent !important; z-index: 1 !important; }
+    a-scene { position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: transparent !important; z-index: 1 !important; }
+    .ui-layer { position: fixed; inset: 0; z-index: 100; pointer-events: none; }
+    .top-bar { position: absolute; top: 0; left: 0; right: 0; padding: 48px 20px 16px; background: linear-gradient(to bottom, rgba(0,0,0,0.65), transparent); display: flex; align-items: center; justify-content: space-between; pointer-events: auto; }
+    .close-btn, .info-btn { width: 42px; height: 42px; background: rgba(255,255,255,0.15); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.25); border-radius: 50%; color: white; font-size: 15px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .dish-label { color: white; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 16px; font-weight: 600; text-shadow: 0 1px 6px rgba(0,0,0,0.6); }
+    .scan-hint { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; transition: opacity 0.5s; }
+    .scan-hint.hidden { opacity: 0; }
+    .scan-ring { width: 200px; height: 200px; border: 2px solid rgba(255,255,255,0.5); border-radius: 28px; margin: 0 auto 16px; position: relative; animation: pulse-ring 2s ease-in-out infinite; }
+    .scan-ring::before { content: ''; position: absolute; top: -2px; left: -2px; width: 24px; height: 24px; border-top: 3px solid #c9a84c; border-left: 3px solid #c9a84c; border-radius: 6px 0 0 0; }
+    .scan-ring::after { content: ''; position: absolute; bottom: -2px; right: -2px; width: 24px; height: 24px; border-bottom: 3px solid #c9a84c; border-right: 3px solid #c9a84c; border-radius: 0 0 6px 0; }
+    @keyframes pulse-ring { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.55; transform: scale(0.96); } }
+    .scan-text { color: white; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; font-weight: 500; text-shadow: 0 1px 8px rgba(0,0,0,0.9); }
+    .scan-subtext { color: rgba(255,255,255,0.6); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 12px; margin-top: 6px; text-shadow: 0 1px 6px rgba(0,0,0,0.8); }
+    .bottom-panel { position: absolute; bottom: 0; left: 0; right: 0; padding: 20px 16px 44px; background: linear-gradient(to top, rgba(0,0,0,0.75), transparent); pointer-events: auto; }
+    .dish-info { background: rgba(20,20,20,0.55); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; padding: 16px 18px; color: white; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .dish-info h3 { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+    .dish-info p { font-size: 12px; opacity: 0.65; margin-bottom: 12px; line-height: 1.5; }
+    .nutrition-row { display: flex; gap: 8px; }
+    .nutrition-chip { flex: 1; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 7px 4px; text-align: center; font-size: 10px; font-weight: 600; color: rgba(255,255,255,0.75); }
+    .nutrition-chip span { display: block; font-size: 14px; font-weight: 700; color: #c9a84c; margin-bottom: 2px; }
+  </style>
+</head>
+<body>
+  <a-scene
+    mindar-image="imageTargetSrc: /targets/pizza.mind; autoStart: true; uiLoading: no; uiError: no; uiScanning: no;"
+    color-space="sRGB"
+    renderer="colorManagement: true; alpha: true; antialias: true; precision: mediump;"
+    vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: false"
+    style="position:fixed;top:0;left:0;width:100%;height:100%;background:transparent;"
+  >
+    <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+    <a-entity mindar-image-target="targetIndex: 0">
+      <a-entity position="0 0.1 0" scale="0.5 0.5 0.5" animation="property: rotation; to: 0 360 0; loop: true; dur: 8000; easing: linear">
+        <a-cylinder color="#d4a055" radius="0.75" height="0.08" position="0 0.04 0"></a-cylinder>
+        <a-cylinder color="#c0392b" radius="0.62" height="0.03" position="0 0.09 0"></a-cylinder>
+        <a-cylinder color="#f5f0e0" radius="0.58" height="0.03" position="0 0.12 0"></a-cylinder>
+        <a-sphere color="#2c1a0e" radius="0.07" position="0.25 0.16 0.1"></a-sphere>
+        <a-sphere color="#2c1a0e" radius="0.06" position="-0.2 0.16 0.25"></a-sphere>
+        <a-sphere color="#2c1a0e" radius="0.07" position="0.1 0.16 -0.3"></a-sphere>
+        <a-sphere color="#2e7d32" radius="0.06" position="0.35 0.15 -0.2" scale="1.5 0.3 1"></a-sphere>
+        <a-sphere color="#2e7d32" radius="0.06" position="-0.1 0.15 0.4" scale="1.5 0.3 1"></a-sphere>
+      </a-entity>
+    </a-entity>
+  </a-scene>
+
+  <div class="ui-layer">
+    <div class="top-bar">
+      <button class="close-btn" onclick="history.back()"><i class="fas fa-times"></i></button>
+      <span class="dish-label">Imperial Truffle Pizza</span>
+      <button class="info-btn"><i class="fas fa-info"></i></button>
+    </div>
+    <div class="scan-hint" id="scanHint">
+      <div class="scan-ring"></div>
+      <p class="scan-text">Scan the pizza image</p>
+      <p class="scan-subtext">Point camera at the dish photo on the menu</p>
+    </div>
+    <div class="bottom-panel">
+      <div class="dish-info">
+        <h3>Imperial Truffle Pizza</h3>
+        <p>Wood-fired pizza with black truffle, burrata and wild rocket</p>
+        <div class="nutrition-row">
+          <div class="nutrition-chip"><span>520</span>kcal</div>
+          <div class="nutrition-chip"><span>18g</span>protein</div>
+          <div class="nutrition-chip"><span>58g</span>carbs</div>
+          <div class="nutrition-chip"><span>24g</span>fat</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    document.querySelector('a-scene').addEventListener('targetFound', () => document.getElementById('scanHint').classList.add('hidden'));
+    document.querySelector('a-scene').addEventListener('targetLost', () => document.getElementById('scanHint').classList.remove('hidden'));
+  </script><script>var _oi=setInterval(function(){var v=document.querySelector("video");if(v){v.style.zIndex="0";v.style.position="fixed";v.style.top="0";v.style.left="0";v.style.width="100vw";v.style.height="100vh";v.style.objectFit="cover";clearInterval(_oi);}},100);</script></body>
+</html>
+
+
