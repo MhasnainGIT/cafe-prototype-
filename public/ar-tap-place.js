@@ -335,6 +335,8 @@ function touchState(ev) {
 
 function onTouchStart(ev) {
   if (ev.touches.length > 2) return;
+  // Prevent browser scroll/zoom on the AR canvas so gestures stay smooth.
+  if (placed) ev.preventDefault();
   gesture.touchMoved = false;
   gesture.prev = touchState(ev);
   if (gesture.prev && gesture.prev.count >= 2) {
@@ -364,21 +366,17 @@ function onTouchMove(ev) {
     updatePlacementPreview(ndc.x, ndc.y);
   }
 
-  // Single-finger drag rotates the model around Y axis and X axis (like model-viewer)
+  // Single-finger drag rotates the model (like model-viewer turntable).
   if (placed && cur.count === 1 && gesture.prev.count === 1 && modelMesh) {
-    const deltaX = (cur.rawX - gesture.prev.rawX) * (window.innerWidth + window.innerHeight) / 2;
-    const deltaY = (cur.rawY - gesture.prev.rawY) * (window.innerWidth + window.innerHeight) / 2;
-    const rotationSpeed = 0.005; // Radians per pixel
-    
-    // Rotate model around Y axis (horizontal drag)
+    const deltaX = cur.rawX - gesture.prev.rawX; // pixels
+    const deltaY = cur.rawY - gesture.prev.rawY;
+    const rotationSpeed = 0.006;
+
     modelMesh.rotation.y += deltaX * rotationSpeed;
-    
-    // Rotate model around X axis (vertical drag)
     modelMesh.rotation.x += deltaY * rotationSpeed;
-    
-    // Clamp X rotation to prevent the plate from flipping upside down
-    modelMesh.rotation.x = THREE.MathUtils.clamp(modelMesh.rotation.x, -Math.PI / 3, Math.PI / 3);
-    
+    modelMesh.rotation.x = THREE.MathUtils.clamp(modelMesh.rotation.x, -Math.PI / 4, Math.PI / 4);
+
+    ev.preventDefault();
     markInteracting();
   }
 
