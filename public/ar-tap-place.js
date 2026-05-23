@@ -5,7 +5,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 const params = new URLSearchParams(location.search);
 const modelUrl = params.get('model') || '/models/Sushi_Platter.glb';
 const SCALE_MIN = 0.1;
-const SCALE_MAX = 3.0;
+const SCALE_MAX = 10.0;
 
 const _raycaster = new THREE.Raycaster();
 const _v3 = new THREE.Vector3();
