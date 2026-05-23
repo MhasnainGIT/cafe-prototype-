@@ -350,6 +350,9 @@ function onTouchStart(ev) {
 }
 
 function onTouchMove(ev) {
+  // Block browser scroll/zoom early so vertical swipes aren't consumed.
+  if (placed) ev.preventDefault();
+
   const cur = touchState(ev);
   if (!cur || !gesture.prev) {
     gesture.prev = cur;
@@ -372,19 +375,19 @@ function onTouchMove(ev) {
     const deltaY = cur.rawY - gesture.prev.rawY;
     const rotationSpeed = 0.006;
 
-    // Horizontal drag → turntable rotation around world Y (unlimited 360°)
+    // Horizontal drag → turntable rotation around world Y (world space)
     const qY = new THREE.Quaternion().setFromAxisAngle(
       new THREE.Vector3(0, 1, 0), deltaX * rotationSpeed
     );
-    // Vertical drag → tilt around camera-relative X axis
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(modelMesh.quaternion);
-    const qX = new THREE.Quaternion().setFromAxisAngle(right, deltaY * rotationSpeed);
+    // Vertical drag → tilt around local X axis (local space)
+    const qX = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(1, 0, 0), deltaY * rotationSpeed
+    );
 
-    modelMesh.quaternion.premultiply(qY);
-    modelMesh.quaternion.premultiply(qX);
+    modelMesh.quaternion.premultiply(qY); // world-space turntable
+    modelMesh.quaternion.multiply(qX);    // local-space tilt
     modelMesh.quaternion.normalize();
 
-    ev.preventDefault();
     markInteracting();
   }
 
@@ -456,11 +459,12 @@ function onPointerMove(ev) {
     const qY = new THREE.Quaternion().setFromAxisAngle(
       new THREE.Vector3(0, 1, 0), deltaX * rotationSpeed
     );
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(modelMesh.quaternion);
-    const qX = new THREE.Quaternion().setFromAxisAngle(right, deltaY * rotationSpeed);
+    const qX = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(1, 0, 0), deltaY * rotationSpeed
+    );
 
-    modelMesh.quaternion.premultiply(qY);
-    modelMesh.quaternion.premultiply(qX);
+    modelMesh.quaternion.premultiply(qY); // world-space turntable
+    modelMesh.quaternion.multiply(qX);    // local-space tilt
     modelMesh.quaternion.normalize();
 
     gesture.lastPointer.x = ev.clientX;
