@@ -24,6 +24,7 @@ const canvas = document.getElementById('ar-canvas');
 const video = document.getElementById('ar-video');
 const container = document.getElementById('ar-container');
 const startBtn = document.getElementById('start-ar-btn');
+const modelViewer = document.getElementById('ar-model-viewer');
 
 let renderer, scene, camera, anchor, modelMesh, mixer;
 const clock = new THREE.Clock();
@@ -309,10 +310,24 @@ function ndcFromClient(clientX, clientY) {
   };
 }
 
+function showModelViewer() {
+  if (placed) return;
+  modelViewer.setAttribute('src', modelUrl);
+  modelViewer.style.display = 'block';
+  canvas.style.display = 'none';
+  placed = true;
+  running = false;
+  setHint('Drag to rotate · Pinch to zoom', 'found');
+}
+
 function onPlaceTap(clientX, clientY) {
   if (gesture.userInteracting) return;
   if (useWebXR && lastHitMatrix) {
     placeFromMatrix(lastHitMatrix);
+    return;
+  }
+  if (!useWebXR) {
+    showModelViewer();
     return;
   }
   const ndc = ndcFromClient(clientX, clientY);
@@ -818,6 +833,11 @@ async function startAR() {
 
 async function init() {
   setupScene();
+
+  // Preload model in <model-viewer> so it's ready instantly on tap.
+  modelViewer.setAttribute('src', modelUrl);
+  modelViewer.setAttribute('loading', 'eager');
+
   try {
     await loadModel();
   } catch (err) {
