@@ -4,17 +4,13 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
 const params = new URLSearchParams(location.search);
 const modelUrl = params.get('model') || '/models/Sushi_Platter.glb';
-const AUTO_ROTATE_SPEED = 0.35;
-const TAP_MOVE_PX = 14;
+const SCALE_MIN = 0.1;
+const SCALE_MAX = 3.0;
 
 const _raycaster = new THREE.Raycaster();
-const _plane = new THREE.Plane();
-const _hitPoint = new THREE.Vector3();
-const _tapNdc = new THREE.Vector2();
-const _surfaceNormal = new THREE.Vector3(0, 1, 0);
-const _camDir = new THREE.Vector3()
-const _dragRight = new THREE.Vector3();
-const _dragForward = new THREE.Vector3();
+const _v3 = new THREE.Vector3();
+const _quat = new THREE.Quaternion();
+const _m4 = new THREE.Matrix4();
 
 const hint = document.getElementById('hint');
 const canvas = document.getElementById('ar-canvas');
@@ -22,7 +18,7 @@ const video = document.getElementById('ar-video');
 const container = document.getElementById('ar-container');
 const startBtn = document.getElementById('start-ar-btn');
 
-let renderer, scene, camera, anchor, modelMesh, mixer;
+let renderer, scene, camera, anchor, modelMesh, mixer, shadowPlane;
 const clock = new THREE.Clock();
 let placed = false;
 let useWebXR = false;
@@ -31,7 +27,7 @@ let xrRefSpace = null;
 let hitTestSource = null;
 let hitTestSourceRequested = false;
 let lastHitMatrix = null;
-let reticle = null;
+let reticle, uiOverlay, loadingBarContainer, loadingBar;
 let stream = null;
 let running = false;
 let modelFootOffset = 0;
@@ -67,35 +63,69 @@ function onDeviceOrientation(event) {
   camera.quaternion.multiply( q0.setFromAxisAngle( zee, - orient ) );
 }
 
-
-// Orbit control state for camera
-const orbitState = {
-  spherical: new THREE.Spherical(),
-  target: new THREE.Vector3(),
-  rotateSpeed: 0.5,
-  zoomSpeed: 0.5,
-  minDistance: 0.5,
-  maxDistance: 5,
-  minPolarAngle: 0.1,
-  maxPolarAngle: Math.PI / 2 - 0.1,
-  enabled: false,
-};
-
 const gesture = {
-  prev: null,
-  scaleFactor: 1,
-  baseScale: 1,
-  minScale: 0.25,
-  maxScale: 4,
-  userInteracting: false,
-  idleTimer: null,
+  active: false,
+  pinchDistance: 0,
+  initialScale: 1,
+  lastRotateX: 0,
   touchMoved: false,
-  pointerId: null,
-  lastPointer: { x: 0, y: 0 },
-  startSpread: 0,
-  // Store the world position where the object was placed
-  placedWorldPosition: null,
 };
+
+/** Create dynamic UI for instructions and reset */
+function createUI() {
+  uiOverlay = document.createElement('div');
+  uiOverlay.id = 'ar-ui-overlay';
+  uiOverlay.style = `
+    position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.7); color: white; padding: 12px 24px;
+    border-radius: 30px; font-family: sans-serif; pointer-events: none;
+    text-align: center; transition: opacity 0.3s; z-index: 100;
+  `;
+  document.body.appendChild(uiOverlay);
+
+  // Loading Progress UI
+  loadingBarContainer = document.createElement('div');
+  loadingBarContainer.style = `
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 200px; display: flex; flex-direction: column; align-items: center;
+    z-index: 1000; transition: opacity 0.3s ease;
+  `;
+
+  const loadingText = document.createElement('div');
+  loadingText.textContent = 'Loading 3D Model...';
+  loadingText.style = 'color: white; font-family: sans-serif; font-size: 14px; margin-bottom: 8px; text-shadow: 0 2px 4px rgba(0,0,0,0.5);';
+  loadingBarContainer.appendChild(loadingText);
+
+  const barTrack = document.createElement('div');
+  barTrack.style = 'width: 100%; height: 4px; background: rgba(255,255,255,0.2); border-radius: 2px; overflow: hidden;';
+  
+  loadingBar = document.createElement('div');
+  loadingBar.style = 'width: 0%; height: 100%; background: #ffffff; transition: width 0.1s linear;';
+  
+  barTrack.appendChild(loadingBar);
+  loadingBarContainer.appendChild(barTrack);
+  document.body.appendChild(loadingBarContainer);
+
+  const resetBtn = document.createElement('button');
+  resetBtn.textContent = '↺ Reset Placement';
+  resetBtn.style = `
+    position: fixed; top: 20px; right: 20px; padding: 10px 15px;
+    background: rgba(255,255,255,0.2); border: 1px solid white; color: white;
+    border-radius: 8px; font-size: 12px; cursor: pointer; display: none; z-index: 101;
+  `;
+  resetBtn.onclick = () => {
+    placed = false;
+    anchor.visible = false;
+    resetBtn.style.display = 'none';
+    updateUI('Move camera to find surface');
+  };
+  document.body.appendChild(resetBtn);
+  return { resetBtn };
+}
+
+function updateUI(text) {
+  if (uiOverlay) uiOverlay.textContent = text;
+}
 
 function isMobileDevice() {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
@@ -137,12 +167,25 @@ function getDracoPath() {
   return `${window.location.origin}/draco/gltf/`;
 }
 
+/** Center and normalize model bounds */
+function normalizeModel(group) {
+  const box = new THREE.Box3().setFromObject(group);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  
+  // Center XZ and set Y to sit on floor
+  group.position.set(-center.x, -box.min.y, -center.z);
+  return size.y;
+}
+
 function prepareModelMeshes(model) {
   model.traverse((node) => {
     if (!node.isMesh || !node.material) return;
     const name = (node.name || '').toLowerCase();
     if (/plane|background|shadow|quad|floor|base/.test(name)) {
-      node.visible = false;
+      node.visible = false; // Hide baked environment floors
+      node.castShadow = false;
+      node.receiveShadow = false;
       return;
     }
     const mats = Array.isArray(node.material) ? node.material : [node.material];
@@ -152,7 +195,8 @@ function prepareModelMeshes(model) {
         return;
       }
       mat.side = THREE.DoubleSide;
-      mat.needsUpdate = true;
+      node.castShadow = true;
+      node.receiveShadow = true;
     });
   });
 }
@@ -161,25 +205,38 @@ function createAnchor() {
   anchor = new THREE.Group();
   scene.add(anchor);
   anchor.visible = false;
+
+  // Shadow Catcher Plane
+  const geometry = new THREE.PlaneGeometry(20, 20);
+  geometry.rotateX(-Math.PI / 2);
+  shadowPlane = new THREE.Mesh(geometry, new THREE.ShadowMaterial({ opacity: 0.4 }));
+  shadowPlane.receiveShadow = true;
+  anchor.add(shadowPlane);
 }
 
 async function loadModel() {
   const loader = new GLTFLoader();
   const draco = new DRACOLoader();
-  draco.setDecoderPath(getDracoPath());
-  draco.setDecoderConfig({ type: 'wasm' });
-  loader.setDRACOLoader(draco);
+  try {
+    draco.setDecoderPath(getDracoPath());
+    loader.setDRACOLoader(draco);
+  } catch (e) { console.warn("Draco not configured", e); }
 
-  const gltf = await loader.loadAsync(modelUrl);
-  prepareModelMeshes(gltf.scene);
-  const s = getResponsiveScale();
+  const gltf = await loader.loadAsync(modelUrl, (xhr) => {
+    if (xhr.lengthComputable) {
+      const percent = (xhr.loaded / xhr.total) * 100;
+      if (loadingBar) loadingBar.style.width = `${percent}%`;
+    }
+  });
+
+  if (loadingBarContainer) {
+    loadingBarContainer.style.opacity = '0';
+    setTimeout(() => { if (loadingBarContainer.parentNode) loadingBarContainer.remove(); }, 300);
+  }
+
   modelMesh = gltf.scene;
-  modelMesh.scale.set(s, s, s);
-  gesture.baseScale = s;
-
-  const box = new THREE.Box3().setFromObject(modelMesh);
-  modelFootOffset = -box.min.y;
-  modelMesh.position.y = modelFootOffset;
+  prepareModelMeshes(gltf.scene);
+  normalizeModel(modelMesh);
 
   if (gltf.animations?.length) {
     mixer = new THREE.AnimationMixer(modelMesh);
@@ -187,109 +244,36 @@ async function loadModel() {
   }
 }
 
-function attachModelToAnchor() {
-  if (!anchor || !modelMesh || anchor.children.includes(modelMesh)) return;
-  anchor.add(modelMesh);
+function placeFromRay(ndcX, ndcY) {
+  // Simplified fallback placement logic (not used in primary WebXR mode)
+  anchor.position.set(0, -1, -2);
+  onModelPlaced();
+}
+
+function onModelPlaced() {
+  if (placed) return;
+  if (!anchor.children.includes(modelMesh)) anchor.add(modelMesh);
+  
   anchor.visible = true;
   placed = true;
   reticle.visible = false;
-  setHint('Drag to rotate · Pinch to zoom', 'found');
-}
+  
+  // Reset transform
+  modelMesh.rotation.set(0, 0, 0);
+  modelMesh.scale.set(0.01, 0.01, 0.01); // Start small for pop-in effect
+  
+  // Soft landing animation
+  new Promise(res => {
+    let s = 0.01;
+    const itv = setInterval(() => {
+      s += 0.15;
+      if (s >= 1) { s = 1; clearInterval(itv); res(); }
+      modelMesh.scale.set(s, s, s);
+    }, 16);
+  });
 
-function applyModelScale() {
-  if (!modelMesh) return;
-  const s = gesture.baseScale * gesture.scaleFactor;
-  modelMesh.scale.set(s, s, s);
-  modelMesh.position.y = modelFootOffset;
-}
-
-function zoomByFactor(factor) {
-  gesture.scaleFactor = THREE.MathUtils.clamp(
-    gesture.scaleFactor * factor,
-    gesture.minScale,
-    gesture.maxScale
-  );
-  applyModelScale();
-  markInteracting();
-}
-
-/** Drag object along the table plane (screen pixels → world XZ). */
-function moveAnchorOnTable(deltaX, deltaY) {
-  // Disabled: do not move the object by dragging/grabbing.
-  void deltaX;
-  void deltaY;
-}
-
-/** Map tap position on screen to estimated depth (lower tap ≈ closer table). */
-function estimateDistanceFromNdc(ndcX, ndcY) {
-  const vertical = THREE.MathUtils.clamp((1 - ndcY) / 2, 0, 1);
-  const horizontal = THREE.MathUtils.clamp(1 - Math.abs(ndcX) * 0.35, 0.65, 1);
-  return THREE.MathUtils.lerp(2.8, 0.32, Math.pow(vertical, 0.72)) * horizontal;
-}
-
-/** Ray through tap intersects a horizontal plane at estimated table height. */
-function computeSurfaceHit(ndcX, ndcY) {
-  _tapNdc.set(ndcX, ndcY);
-  _raycaster.setFromCamera(_tapNdc, camera);
-
-  const dist = estimateDistanceFromNdc(ndcX, ndcY);
-  const probe = _raycaster.ray.origin
-    .clone()
-    .add(_raycaster.ray.direction.clone().normalize().multiplyScalar(dist));
-
-  _plane.setFromNormalAndCoplanarPoint(_surfaceNormal, probe);
-  const hit = _raycaster.ray.intersectPlane(_plane, _hitPoint);
-
-  return {
-    point: hit ? _hitPoint.clone() : probe,
-    normal: _surfaceNormal.clone(),
-  };
-}
-
-function alignAnchorToSurface(point, normal) {
-  // Store the world position where the object is placed
-  gesture.placedWorldPosition = point.clone();
-  anchor.position.copy(gesture.placedWorldPosition);
-  anchor.quaternion.set(0, 0, 0, 1);
-  anchor.scale.set(1, 1, 1);
-
-  const flatNormal = normal.clone().normalize();
-  if (flatNormal.y < 0.15) {
-    anchor.position.copy(gesture.placedWorldPosition);
-  } else {
-    const toCam = camera.position.clone().sub(gesture.placedWorldPosition);
-    toCam.y = 0;
-    if (toCam.lengthSq() > 1e-4) {
-      anchor.rotation.y = Math.atan2(toCam.x, toCam.z);
-    }
-  }
-}
-
-function placeFromMatrix(matrix) {
-  if (!anchor) return;
-  const m = new THREE.Matrix4().fromArray(matrix);
-  const pos = new THREE.Vector3();
-  const quat = new THREE.Quaternion();
-  const scale = new THREE.Vector3();
-  m.decompose(pos, quat, scale);
-
-  const normal = new THREE.Vector3(0, 1, 0).applyQuaternion(quat).normalize();
-  alignAnchorToSurface(pos, normal);
-  attachModelToAnchor();
-}
-
-function placeFromRay(ndcX, ndcY) {
-  const { point, normal } = computeSurfaceHit(ndcX, ndcY);
-  alignAnchorToSurface(point, normal);
-  attachModelToAnchor();
-}
-
-function updatePlacementPreview(ndcX, ndcY) {
-  if (placed || !running || useWebXR) return;
-  const { point } = computeSurfaceHit(ndcX, ndcY);
-  reticle.position.copy(point);
-  reticle.position.y += 0.004;
-  reticle.visible = true;
+  updateUI('Drag to rotate · Pinch to scale');
+  document.querySelector('button[onclick*="Reset"]').style.display = 'block';
 }
 
 function ndcFromClient(clientX, clientY) {
@@ -301,186 +285,62 @@ function ndcFromClient(clientX, clientY) {
 }
 
 function onPlaceTap(clientX, clientY) {
-  if (gesture.userInteracting) return;
+  if (placed) return;
   if (useWebXR && lastHitMatrix) {
-    placeFromMatrix(lastHitMatrix);
+    anchor.position.setFromMatrixPosition(_m4.fromArray(lastHitMatrix));
+    onModelPlaced();
     return;
   }
   const ndc = ndcFromClient(clientX, clientY);
   placeFromRay(ndc.x, ndc.y);
 }
 
-function markInteracting() {
-  gesture.userInteracting = true;
-  clearTimeout(gesture.idleTimer);
-  gesture.idleTimer = setTimeout(() => {
-    gesture.userInteracting = false;
-  }, 1400);
-}
-
-function touchState(ev) {
-  if (!ev.touches.length) return null;
-  const list = [...ev.touches];
-  const cx = list.reduce((s, t) => s + t.clientX, 0) / list.length;
-  const cy = list.reduce((s, t) => s + t.clientY, 0) / list.length;
-  const sc = 2 / (window.innerWidth + window.innerHeight);
-  const state = { count: list.length, x: cx * sc, y: cy * sc, rawX: cx, rawY: cy, spread: 0 };
-  if (list.length >= 2) {
-    state.spread =
-      (list.reduce((sum, t) => sum + Math.hypot(cx - t.clientX, cy - t.clientY), 0) / list.length) * sc;
-  }
-  return state;
-}
-
 function onTouchStart(ev) {
-  if (ev.touches.length > 2) return;
-  gesture.touchMoved = false;
-  gesture.prev = touchState(ev);
-  if (gesture.prev && gesture.prev.count >= 2) {
-    gesture.startSpread = gesture.prev.spread;
-  }
-  if (!placed && running && !useWebXR && ev.touches.length === 1) {
-    const t = ev.touches[0];
-    const ndc = ndcFromClient(t.clientX, t.clientY);
-    updatePlacementPreview(ndc.x, ndc.y);
+  if (ev.touches.length === 1) {
+    gesture.active = true;
+    gesture.lastRotateX = ev.touches[0].pageX;
+  } else if (ev.touches.length === 2) {
+    gesture.pinchDistance = Math.hypot(
+      ev.touches[1].pageX - ev.touches[0].pageX,
+      ev.touches[1].pageY - ev.touches[0].pageY
+    );
+    gesture.initialScale = modelMesh.scale.x;
   }
 }
 
 function onTouchMove(ev) {
-  const cur = touchState(ev);
-  if (!cur || !gesture.prev) {
-    gesture.prev = cur;
-    return;
-  }
+  if (!placed || !gesture.active) return;
 
-  if (Math.hypot(cur.rawX - gesture.prev.rawX, cur.rawY - gesture.prev.rawY) > TAP_MOVE_PX) {
-    gesture.touchMoved = true;
+  if (ev.touches.length === 1) {
+    const delta = ev.touches[0].pageX - gesture.lastRotateX;
+    modelMesh.rotation.y += delta * 0.01;
+    gesture.lastRotateX = ev.touches[0].pageX;
+  } else if (ev.touches.length === 2) {
+    const dist = Math.hypot(
+      ev.touches[1].pageX - ev.touches[0].pageX,
+      ev.touches[1].pageY - ev.touches[0].pageY
+    );
+    const ratio = dist / gesture.pinchDistance;
+    const newScale = THREE.MathUtils.clamp(gesture.initialScale * ratio, SCALE_MIN, SCALE_MAX);
+    modelMesh.scale.set(newScale, newScale, newScale);
+    updateUI(`Scale: ${Math.round(newScale * 100)}%`);
   }
-
-  // Preview only before first placement.
-  if (!placed && running && !useWebXR && cur.count === 1) {
-    const ndc = ndcFromClient(cur.rawX, cur.rawY);
-    updatePlacementPreview(ndc.x, ndc.y);
-  }
-
-  // Single-finger drag rotates the model around Y axis and X axis (like model-viewer)
-  if (placed && cur.count === 1 && gesture.prev.count === 1 && modelMesh) {
-    const deltaX = (cur.rawX - gesture.prev.rawX) * (window.innerWidth + window.innerHeight) / 2;
-    const deltaY = (cur.rawY - gesture.prev.rawY) * (window.innerWidth + window.innerHeight) / 2;
-    const rotationSpeed = 0.005; // Radians per pixel
-    
-    // Rotate model around Y axis (horizontal drag)
-    modelMesh.rotation.y += deltaX * rotationSpeed;
-    
-    // Rotate model around X axis (vertical drag)
-    modelMesh.rotation.x += deltaY * rotationSpeed;
-    
-    // Clamp X rotation to prevent the plate from flipping upside down
-    modelMesh.rotation.x = THREE.MathUtils.clamp(modelMesh.rotation.x, -Math.PI / 3, Math.PI / 3);
-    
-    markInteracting();
-  }
-
-  // Pinch-to-zoom using robust startSpread tracking.
-  if (cur.count >= 2 && gesture.prev.count >= 2 && gesture.startSpread > 0) {
-    const spreadChange = cur.spread - gesture.prev.spread;
-    const zoomFactor = 1 + spreadChange / gesture.startSpread;
-    
-    // Zoom the model
-    zoomByFactor(zoomFactor);
-    
-    // Also adjust camera distance for smoother zoom
-    if (orbitState.enabled) {
-      orbitState.spherical.radius = THREE.MathUtils.clamp(
-        orbitState.spherical.radius / zoomFactor,
-        orbitState.minDistance,
-        orbitState.maxDistance
-      );
-    }
-    
-    ev.preventDefault();
-  }
-
-  gesture.prev = cur;
 }
 
 function onTouchEnd(ev) {
-  if (ev.touches.length > 0) {
-    gesture.prev = null;
-    return;
-  }
-  const t = ev.changedTouches[0];
-  if (!t) {
-    gesture.prev = null;
-    return;
-  }
-
-  if (!gesture.touchMoved) {
+  gesture.active = false;
+  if (ev.touches.length === 0 && !placed) {
+    const t = ev.changedTouches[0];
     onPlaceTap(t.clientX, t.clientY);
     ev.preventDefault();
   }
-
-  gesture.prev = null;
-  gesture.touchMoved = false;
-}
-
-function onPointerDown(ev) {
-  if (ev.pointerType === 'touch') return;
-  if (!placed) return;
-  gesture.pointerId = ev.pointerId;
-  gesture.lastPointer.x = ev.clientX;
-  gesture.lastPointer.y = ev.clientY;
-  canvas.setPointerCapture(ev.pointerId);
-}
-
-function onPointerMove(ev) {
-  if (!placed && running && !useWebXR) {
-    const ndc = ndcFromClient(ev.clientX, ev.clientY);
-    updatePlacementPreview(ndc.x, ndc.y);
-    return;
-  }
-
-  if (placed && gesture.pointerId === ev.pointerId && modelMesh) {
-    const deltaX = ev.clientX - gesture.lastPointer.x;
-    const rotationSpeed = 0.007; // Radians per pixel
-    modelMesh.rotation.y += deltaX * rotationSpeed;
-    gesture.lastPointer.x = ev.clientX;
-    gesture.lastPointer.y = ev.clientY;
-    markInteracting();
-  }
-}
-
-function onPointerUp(ev) {
-  if (gesture.pointerId === ev.pointerId) {
-    gesture.pointerId = null;
-    try {
-      canvas.releasePointerCapture(ev.pointerId);
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
-function onWheel(ev) {
-  // Disabled entirely (per requirements).
-  ev.preventDefault();
-}
-
-function onCanvasClick(ev) {
-  if (ev.pointerType === 'touch') return;
-  onPlaceTap(ev.clientX, ev.clientY);
+  if (placed) updateUI('Drag to rotate · Pinch to scale');
 }
 
 function setupGestures() {
   canvas.addEventListener('touchstart', onTouchStart, { passive: false });
   canvas.addEventListener('touchmove', onTouchMove, { passive: false });
   canvas.addEventListener('touchend', onTouchEnd, { passive: false });
-  canvas.addEventListener('click', onCanvasClick);
-  canvas.addEventListener('pointerdown', onPointerDown);
-  canvas.addEventListener('pointermove', onPointerMove);
-  canvas.addEventListener('pointerup', onPointerUp);
-  canvas.addEventListener('pointercancel', onPointerUp);
-  canvas.addEventListener('wheel', onWheel, { passive: false });
 }
 
 function setupScene() {
@@ -490,6 +350,8 @@ function setupScene() {
     antialias: true,
     powerPreference: 'high-performance',
   });
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setClearColor(0x000000, 0);
@@ -498,9 +360,12 @@ function setupScene() {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 100);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 1.15));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.9);
-  dir.position.set(1, 2, 1);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+  dir.position.set(2, 4, 2);
+  dir.castShadow = true;
+  dir.shadow.mapSize.set(1024, 1024);
+  dir.shadow.camera.far = 10;
   scene.add(dir);
 
   createAnchor();
@@ -509,11 +374,13 @@ function setupScene() {
     new THREE.RingGeometry(0.06, 0.09, 40).rotateX(-Math.PI / 2),
     new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 })
   );
+  reticle.matrixAutoUpdate = false;
   reticle.visible = false;
   scene.add(reticle);
 
   window.addEventListener('resize', onResize);
   setupGestures();
+  createUI();
 }
 
 function syncCameraFov() {
@@ -536,41 +403,6 @@ function onResize() {
   syncCameraFov();
 }
 
-function updateOrbitControls() {
-  // Only apply orbit controls in non-WebXR mode when object is placed
-  if (useWebXR || !placed || !orbitState.enabled) return;
-  
-  if (!gesture.placedWorldPosition) return;
-  
-  // Set the orbit target to the placed object position
-  orbitState.target.copy(gesture.placedWorldPosition);
-  
-  // Calculate camera position from spherical coordinates
-  // THREE.Spherical: radius, phi (polar angle from +Y), theta (azimuthal angle in XZ plane)
-  const offset = new THREE.Vector3();
-  offset.setFromSpherical(orbitState.spherical);
-  
-  // Update camera position
-  camera.position.copy(orbitState.target).add(offset);
-  camera.lookAt(orbitState.target);
-}
-
-function initOrbitFromCamera() {
-  // Initialize orbit state based on current camera position relative to the placed object
-  if (!gesture.placedWorldPosition) return;
-  
-  const offset = new THREE.Vector3().subVectors(camera.position, gesture.placedWorldPosition);
-  orbitState.spherical.setFromVector3(offset);
-  orbitState.target.copy(gesture.placedWorldPosition);
-  orbitState.enabled = true;
-}
-
-function updateAutoRotate(dt) {
-  // Intentionally disabled to keep the object fixed relative to the world.
-  // Zoom is still handled by scaling the model.
-  void dt;
-}
-
 function renderFrame(_t, frame) {
   const dt = clock.getDelta();
   if (mixer) mixer.update(dt);
@@ -581,23 +413,17 @@ function renderFrame(_t, frame) {
       const pose = hits[0].getPose(xrRefSpace);
       if (pose) {
         lastHitMatrix = pose.transform.matrix;
-        if (!placed) {
-          const m = new THREE.Matrix4().fromArray(lastHitMatrix);
-          const pos = new THREE.Vector3();
-          const quat = new THREE.Quaternion();
-          const scl = new THREE.Vector3();
-          m.decompose(pos, quat, scl);
-          reticle.position.copy(pos);
-          reticle.quaternion.copy(quat);
-          reticle.visible = true;
-        }
+        reticle.matrix.fromArray(lastHitMatrix);
+        reticle.visible = !placed;
+        if (!placed) updateUI('Tap to place');
+      } else {
+        reticle.visible = false;
       }
     } else if (!placed) {
       reticle.visible = false;
     }
   }
 
-  updateAutoRotate(dt);
   renderer.render(scene, camera);
 }
 
@@ -635,16 +461,24 @@ async function startWebXR() {
   if (!hitTestSourceRequested) {
     try {
       await requestHitTest(xrSession);
-    } catch (err) {
-      console.warn('[AR] hit-test unavailable', err);
-    }
+    } catch (err) { console.warn('[AR] hit-test unavailable', err); }
+  }
+
+  // Light Estimation support
+  if (xrSession.requestLightProbe) {
+    xrSession.requestLightProbe().then(probe => {
+      console.log("[AR] Light probe acquired");
+    });
   }
 
   xrSession.addEventListener('select', () => {
-    if (lastHitMatrix) placeFromMatrix(lastHitMatrix);
+    if (lastHitMatrix) {
+      anchor.position.setFromMatrixPosition(_m4.fromArray(lastHitMatrix));
+      onModelPlaced();
+    }
   });
 
-  setHint('Aim at a surface, then tap to place');
+  updateUI('Move camera to find surface');
   renderer.setAnimationLoop(renderFrame);
   running = true;
 }
@@ -700,9 +534,7 @@ async function startCameraFallback() {
 
   syncCameraFov();
   reticle.visible = true;
-  // In fallback mode (no WebXR hit-test), we still must keep the model at a fixed world anchor.
-  // Disable device-orientation camera updates after placement to prevent “screen-space attached” feel.
-  setHint('Tap the table to place · then rotate and pinch to zoom');
+  updateUI('Tap screen to place');
   running = true;
 
 
@@ -778,6 +610,7 @@ async function init() {
     await loadModel();
   } catch (err) {
     console.error(err);
+    if (loadingBarContainer) loadingBarContainer.remove();
     setHint('Could not load 3D model', 'error');
     startBtn.disabled = true;
     return;
