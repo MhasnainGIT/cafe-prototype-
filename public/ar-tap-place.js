@@ -36,6 +36,31 @@ const gesture = {
   touchMoved: false,
 };
 
+function isMobileDevice() {
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+}
+
+function isLocalhost() {
+  return /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
+}
+
+function cameraErrorMessage(err) {
+  const name = err?.name || '';
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+    return 'Camera blocked — allow camera for this site in browser settings, then refresh.';
+  }
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+    return 'No camera found on this device.';
+  }
+  if (name === 'NotReadableError' || name === 'TrackStartError') {
+    return 'Camera is in use by another app — close it and try again.';
+  }
+  if (!window.isSecureContext) {
+    return 'Use http://localhost:5173 (not https) or deploy with a valid certificate.';
+  }
+  return `Camera failed (${name || 'unknown'}). Refresh and try again.`;
+}
+
 function setHint(text, type) {
   hint.textContent = text;
   hint.classList.remove('found', 'error');
@@ -350,22 +375,54 @@ async function startWebXR() {
   running = true;
 }
 
+async function acquireCameraStream() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error('Camera API not available in this browser');
+  }
+
+  const tries = [
+    { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } },
+    { video: { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 } } },
+    { video: true },
+  ];
+
+  let lastErr;
+  for (const constraints of tries) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({ audio: false, ...constraints });
+    } catch (err) {
+      lastErr = err;
+      console.warn('[AR] getUserMedia attempt failed', constraints, err);
+    }
+  }
+  throw lastErr;
+}
+
 async function startCameraFallback() {
   useWebXR = false;
   video.style.display = 'block';
 
-  stream = await navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: {
-      facingMode: { ideal: 'environment' },
-      width: { ideal: 1920 },
-      height: { ideal: 1080 },
-    },
-  });
-
+  stream = await acquireCameraStream();
   video.srcObject = stream;
   video.muted = true;
-  await video.play();
+  video.playsInline = true;
+
+  try {
+    await video.play();
+  } catch (playErr) {
+    console.warn('[AR] video.play()', playErr);
+  }
+
+  if (video.readyState < 2) {
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('Camera stream timed out')), 8000);
+      video.onloadedmetadata = () => {
+        clearTimeout(t);
+        resolve();
+      };
+    });
+    await video.play().catch(() => {});
+  }
 
   setHint('Tap the table or any surface to place the dish');
   running = true;
@@ -380,10 +437,25 @@ async function startCameraFallback() {
 
 async function startAR() {
   if (running) return;
-  startBtn.style.display = 'none';
-  setHint('Starting…');
 
-  if (navigator.xr?.isSessionSupported) {
+  if (!window.isSecureContext) {
+    const fixUrl = isLocalhost()
+      ? `http://localhost:${location.port || '5173'}${location.pathname}${location.search}`
+      : null;
+    setHint(
+      fixUrl
+        ? `Not secure — open ${fixUrl} instead of https`
+        : 'This page must be served over HTTPS with a valid certificate.',
+      'error'
+    );
+    return;
+  }
+
+  startBtn.style.display = 'none';
+  setHint('Starting camera…');
+
+  const tryWebXR = isMobileDevice() && navigator.xr?.isSessionSupported;
+  if (tryWebXR) {
     try {
       const supported = await navigator.xr.isSessionSupported('immersive-ar');
       if (supported) {
@@ -391,7 +463,7 @@ async function startAR() {
         return;
       }
     } catch (err) {
-      console.warn('[AR] WebXR check failed', err);
+      console.warn('[AR] WebXR unavailable, using camera', err);
     }
   }
 
@@ -409,13 +481,27 @@ async function init() {
     return;
   }
 
-  const xrMaybe = navigator.xr && (await navigator.xr.isSessionSupported?.('immersive-ar').catch(() => false));
+  if (location.protocol === 'https:' && isLocalhost()) {
+    const httpUrl = `http://localhost:${location.port || '5173'}${location.pathname}${location.search}`;
+    setHint(`For local dev use ${httpUrl} — avoids certificate errors`);
+  }
+
+  const xrMaybe =
+    isMobileDevice() &&
+    navigator.xr &&
+    (await navigator.xr.isSessionSupported?.('immersive-ar').catch(() => false));
   startBtn.textContent = xrMaybe ? 'Start AR' : 'Start camera';
   startBtn.addEventListener('click', () => {
     startAR().catch((err) => {
       console.error('[AR]', err);
-      setHint('Allow camera access, then try again', 'error');
+      setHint(cameraErrorMessage(err), 'error');
       startBtn.style.display = 'block';
+      startBtn.disabled = false;
+      running = false;
+      if (stream) {
+        stream.getTracks().forEach((t) => t.stop());
+        stream = null;
+      }
     });
   });
 }

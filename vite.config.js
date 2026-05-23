@@ -2,13 +2,17 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import basicSsl from '@vitejs/plugin-basic-ssl'
 
-// https://vitejs.dev/config/
-export default defineConfig({
-  plugins: [react(), basicSsl()],
+// Default `npm run dev`: HTTP (no cert warning; camera works on localhost).
+// `npm run dev:https`: self-signed HTTPS for phone AR over LAN only.
+export default defineConfig(({ mode }) => {
+  const useHttps = mode === 'https'
+  return {
+  plugins: useHttps ? [react(), basicSsl()] : [react()],
   server: {
-    https: true,
-    // Ensure GLB models are not caught by SPA fallback
+    https: useHttps,
+    host: true,
     fs: { allow: ['..'] },
   },
   assetsInclude: ['**/*.glb'],
+  }
 })
