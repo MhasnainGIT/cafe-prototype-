@@ -591,9 +591,12 @@ function initOrbitFromCamera() {
 }
 
 function updateAutoRotate(dt) {
-  // Intentionally disabled to keep the object fixed relative to the world.
-  // Zoom is still handled by scaling the model.
-  void dt;
+  if (!placed || !modelMesh || gesture.userInteracting) return;
+  const qY = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(0, 1, 0), AUTO_ROTATE_SPEED * dt
+  );
+  modelMesh.quaternion.premultiply(qY);
+  modelMesh.quaternion.normalize();
 }
 
 function renderFrame(_t, frame) {
