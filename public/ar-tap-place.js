@@ -68,6 +68,7 @@ const gesture = {
   pinchDistance: 0,
   initialScale: 1,
   lastRotateX: 0,
+  lastRotateY: 0,
   touchMoved: false,
 };
 
@@ -299,6 +300,7 @@ function onTouchStart(ev) {
   if (ev.touches.length === 1) {
     gesture.active = true;
     gesture.lastRotateX = ev.touches[0].pageX;
+    gesture.lastRotateY = ev.touches[0].pageY;
   } else if (ev.touches.length === 2) {
     gesture.pinchDistance = Math.hypot(
       ev.touches[1].pageX - ev.touches[0].pageX,
@@ -312,9 +314,14 @@ function onTouchMove(ev) {
   if (!placed || !gesture.active) return;
 
   if (ev.touches.length === 1) {
-    const delta = ev.touches[0].pageX - gesture.lastRotateX;
-    modelMesh.rotation.y += delta * 0.01;
+    const deltaX = ev.touches[0].pageX - gesture.lastRotateX;
+    const deltaY = ev.touches[0].pageY - gesture.lastRotateY;
+    
+    modelMesh.rotation.y += deltaX * 0.01;
+    modelMesh.rotation.x += deltaY * 0.01;
+    
     gesture.lastRotateX = ev.touches[0].pageX;
+    gesture.lastRotateY = ev.touches[0].pageY;
   } else if (ev.touches.length === 2) {
     const dist = Math.hypot(
       ev.touches[1].pageX - ev.touches[0].pageX,
