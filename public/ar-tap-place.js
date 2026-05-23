@@ -4,9 +4,17 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
 const params = new URLSearchParams(location.search);
 const modelUrl = params.get('model') || '/models/Sushi_Platter.glb';
-const PLACE_DISTANCE = 1.15;
 const AUTO_ROTATE_SPEED = 0.35;
 const TAP_MOVE_PX = 14;
+
+const _raycaster = new THREE.Raycaster();
+const _plane = new THREE.Plane();
+const _hitPoint = new THREE.Vector3();
+const _tapNdc = new THREE.Vector2();
+const _surfaceNormal = new THREE.Vector3(0, 1, 0);
+const _camDir = new THREE.Vector3();
+const _dragRight = new THREE.Vector3();
+const _dragForward = new THREE.Vector3();
 
 const hint = document.getElementById('hint');
 const canvas = document.getElementById('ar-canvas');
@@ -26,14 +34,19 @@ let lastHitMatrix = null;
 let reticle = null;
 let stream = null;
 let running = false;
+let modelFootOffset = 0;
 
 const gesture = {
   prev: null,
   scaleFactor: 1,
   baseScale: 1,
+  minScale: 0.25,
+  maxScale: 4,
   userInteracting: false,
   idleTimer: null,
   touchMoved: false,
+  pointerId: null,
+  lastPointer: { x: 0, y: 0 },
 };
 
 function isMobileDevice() {
@@ -115,6 +128,11 @@ async function loadModel() {
   modelMesh = gltf.scene;
   modelMesh.scale.set(s, s, s);
   gesture.baseScale = s;
+
+  const box = new THREE.Box3().setFromObject(modelMesh);
+  modelFootOffset = -box.min.y;
+  modelMesh.position.y = modelFootOffset;
+
   if (gltf.animations?.length) {
     mixer = new THREE.AnimationMixer(modelMesh);
     mixer.clipAction(gltf.animations[0]).play();
@@ -127,26 +145,115 @@ function attachModelToAnchor() {
   anchor.visible = true;
   placed = true;
   reticle.visible = false;
-  setHint('Pinch to resize · drag to rotate', 'found');
+  setHint('Drag to move · pinch or scroll to zoom', 'found');
+}
+
+function applyModelScale() {
+  if (!modelMesh) return;
+  const s = gesture.baseScale * gesture.scaleFactor;
+  modelMesh.scale.set(s, s, s);
+  modelMesh.position.y = modelFootOffset;
+}
+
+function zoomByFactor(factor) {
+  gesture.scaleFactor = THREE.MathUtils.clamp(
+    gesture.scaleFactor * factor,
+    gesture.minScale,
+    gesture.maxScale
+  );
+  applyModelScale();
+  markInteracting();
+}
+
+/** Drag object along the table plane (screen pixels → world XZ). */
+function moveAnchorOnTable(deltaX, deltaY) {
+  if (!anchor) return;
+  const dist = Math.max(0.4, anchor.position.distanceTo(camera.position));
+  const speed = dist * 0.0028;
+
+  camera.getWorldDirection(_camDir);
+  _dragRight.crossVectors(_camDir, camera.up).normalize();
+  _dragForward.crossVectors(_dragRight, _surfaceNormal).normalize();
+  _dragForward.y = 0;
+  _dragRight.y = 0;
+  if (_dragForward.lengthSq() < 1e-6) _dragForward.set(0, 0, -1);
+  else _dragForward.normalize();
+  if (_dragRight.lengthSq() < 1e-6) _dragRight.set(1, 0, 0);
+  else _dragRight.normalize();
+
+  anchor.position.addScaledVector(_dragRight, deltaX * speed);
+  anchor.position.addScaledVector(_dragForward, -deltaY * speed);
+  markInteracting();
+}
+
+/** Map tap position on screen to estimated depth (lower tap ≈ closer table). */
+function estimateDistanceFromNdc(ndcX, ndcY) {
+  const vertical = THREE.MathUtils.clamp((1 - ndcY) / 2, 0, 1);
+  const horizontal = THREE.MathUtils.clamp(1 - Math.abs(ndcX) * 0.35, 0.65, 1);
+  return THREE.MathUtils.lerp(2.8, 0.32, Math.pow(vertical, 0.72)) * horizontal;
+}
+
+/** Ray through tap intersects a horizontal plane at estimated table height. */
+function computeSurfaceHit(ndcX, ndcY) {
+  _tapNdc.set(ndcX, ndcY);
+  _raycaster.setFromCamera(_tapNdc, camera);
+
+  const dist = estimateDistanceFromNdc(ndcX, ndcY);
+  const probe = _raycaster.ray.origin
+    .clone()
+    .add(_raycaster.ray.direction.clone().normalize().multiplyScalar(dist));
+
+  _plane.setFromNormalAndCoplanarPoint(_surfaceNormal, probe);
+  const hit = _raycaster.ray.intersectPlane(_plane, _hitPoint);
+
+  return {
+    point: hit ? _hitPoint.clone() : probe,
+    normal: _surfaceNormal.clone(),
+  };
+}
+
+function alignAnchorToSurface(point, normal) {
+  anchor.position.copy(point);
+  anchor.quaternion.set(0, 0, 0, 1);
+  anchor.scale.set(1, 1, 1);
+
+  const flatNormal = normal.clone().normalize();
+  if (flatNormal.y < 0.15) {
+    anchor.position.copy(point);
+  } else {
+    const toCam = camera.position.clone().sub(point);
+    toCam.y = 0;
+    if (toCam.lengthSq() > 1e-4) {
+      anchor.rotation.y = Math.atan2(toCam.x, toCam.z);
+    }
+  }
 }
 
 function placeFromMatrix(matrix) {
   if (!anchor) return;
-  anchor.matrix.fromArray(matrix);
-  anchor.matrix.decompose(anchor.position, anchor.quaternion, anchor.scale);
-  anchor.scale.set(1, 1, 1);
+  const m = new THREE.Matrix4().fromArray(matrix);
+  const pos = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  m.decompose(pos, quat, scale);
+
+  const normal = new THREE.Vector3(0, 1, 0).applyQuaternion(quat).normalize();
+  alignAnchorToSurface(pos, normal);
   attachModelToAnchor();
 }
 
 function placeFromRay(ndcX, ndcY) {
-  const raycaster = new THREE.Raycaster();
-  raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
-  const point = raycaster.ray.origin
-    .clone()
-    .add(raycaster.ray.direction.clone().normalize().multiplyScalar(PLACE_DISTANCE));
-  anchor.position.copy(point);
-  anchor.rotation.set(0, 0, 0);
+  const { point, normal } = computeSurfaceHit(ndcX, ndcY);
+  alignAnchorToSurface(point, normal);
   attachModelToAnchor();
+}
+
+function updatePlacementPreview(ndcX, ndcY) {
+  if (placed || !running || useWebXR) return;
+  const { point } = computeSurfaceHit(ndcX, ndcY);
+  reticle.position.copy(point);
+  reticle.position.y += 0.004;
+  reticle.visible = true;
 }
 
 function ndcFromClient(clientX, clientY) {
@@ -194,6 +301,11 @@ function onTouchStart(ev) {
   gesture.touchMoved = false;
   gesture.prev = touchState(ev);
   if (gesture.prev) gesture.prev.startSpread = gesture.prev.spread;
+  if (!placed && running && !useWebXR && ev.touches.length === 1) {
+    const t = ev.touches[0];
+    const ndc = ndcFromClient(t.clientX, t.clientY);
+    updatePlacementPreview(ndc.x, ndc.y);
+  }
 }
 
 function onTouchMove(ev) {
@@ -205,48 +317,94 @@ function onTouchMove(ev) {
   if (Math.hypot(cur.rawX - gesture.prev.rawX, cur.rawY - gesture.prev.rawY) > TAP_MOVE_PX) {
     gesture.touchMoved = true;
   }
+  if (!placed && running && !useWebXR && cur.count === 1) {
+    const ndc = ndcFromClient(cur.rawX, cur.rawY);
+    updatePlacementPreview(ndc.x, ndc.y);
+  }
+
   if (!placed || !anchor) {
     gesture.prev = cur;
     return;
   }
+
   if (cur.count === 1 && gesture.prev.count === 1) {
-    markInteracting();
-    anchor.rotation.y += (cur.x - gesture.prev.x) * 4;
-    anchor.rotation.x += (cur.y - gesture.prev.y) * 4;
+    moveAnchorOnTable(cur.rawX - gesture.prev.rawX, cur.rawY - gesture.prev.rawY);
     ev.preventDefault();
   }
-  if (cur.count >= 2 && gesture.prev.startSpread) {
-    markInteracting();
+
+  if (cur.count >= 2 && gesture.prev.count >= 2 && gesture.prev.startSpread > 0) {
     const spreadChange = cur.spread - gesture.prev.spread;
-    gesture.scaleFactor *= 1 + spreadChange / gesture.prev.startSpread;
-    gesture.scaleFactor = Math.max(0.4, Math.min(3, gesture.scaleFactor));
-    const s = gesture.baseScale * gesture.scaleFactor;
-    modelMesh.scale.set(s, s, s);
+    zoomByFactor(1 + spreadChange / gesture.prev.startSpread);
     ev.preventDefault();
   }
+
   gesture.prev = cur;
 }
 
 function onTouchEnd(ev) {
-  if (gesture.touchMoved || ev.touches.length > 0) {
+  if (ev.touches.length > 0) {
     gesture.prev = null;
     return;
   }
   const t = ev.changedTouches[0];
-  if (!t) return;
-  if (!placed) {
-    onPlaceTap(t.clientX, t.clientY);
-    ev.preventDefault();
-  } else if (!gesture.userInteracting) {
+  if (!t) {
+    gesture.prev = null;
+    return;
+  }
+  if (!placed && !gesture.touchMoved) {
     onPlaceTap(t.clientX, t.clientY);
     ev.preventDefault();
   }
   gesture.prev = null;
+  gesture.touchMoved = false;
+}
+
+function onPointerDown(ev) {
+  if (ev.pointerType === 'touch') return;
+  if (!placed) return;
+  gesture.pointerId = ev.pointerId;
+  gesture.lastPointer.x = ev.clientX;
+  gesture.lastPointer.y = ev.clientY;
+  canvas.setPointerCapture(ev.pointerId);
+}
+
+function onPointerMove(ev) {
+  if (!placed && running && !useWebXR) {
+    const ndc = ndcFromClient(ev.clientX, ev.clientY);
+    updatePlacementPreview(ndc.x, ndc.y);
+    return;
+  }
+  if (!placed || gesture.pointerId !== ev.pointerId) return;
+  if (ev.pointerType === 'touch') return;
+  const dx = ev.clientX - gesture.lastPointer.x;
+  const dy = ev.clientY - gesture.lastPointer.y;
+  if (dx !== 0 || dy !== 0) {
+    moveAnchorOnTable(dx, dy);
+    gesture.lastPointer.x = ev.clientX;
+    gesture.lastPointer.y = ev.clientY;
+  }
+}
+
+function onPointerUp(ev) {
+  if (gesture.pointerId === ev.pointerId) {
+    gesture.pointerId = null;
+    try {
+      canvas.releasePointerCapture(ev.pointerId);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function onWheel(ev) {
+  if (!placed) return;
+  ev.preventDefault();
+  zoomByFactor(ev.deltaY > 0 ? 0.9 : 1.1);
 }
 
 function onCanvasClick(ev) {
   if (ev.pointerType === 'touch') return;
-  onPlaceTap(ev.clientX, ev.clientY);
+  if (!placed) onPlaceTap(ev.clientX, ev.clientY);
 }
 
 function setupGestures() {
@@ -254,6 +412,11 @@ function setupGestures() {
   canvas.addEventListener('touchmove', onTouchMove, { passive: false });
   canvas.addEventListener('touchend', onTouchEnd, { passive: false });
   canvas.addEventListener('click', onCanvasClick);
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointercancel', onPointerUp);
+  canvas.addEventListener('wheel', onWheel, { passive: false });
 }
 
 function setupScene() {
@@ -279,10 +442,9 @@ function setupScene() {
   createAnchor();
 
   reticle = new THREE.Mesh(
-    new THREE.RingGeometry(0.07, 0.095, 32).rotateX(-Math.PI / 2),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 })
+    new THREE.RingGeometry(0.06, 0.09, 40).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 })
   );
-  reticle.matrixAutoUpdate = false;
   reticle.visible = false;
   scene.add(reticle);
 
@@ -290,12 +452,24 @@ function setupScene() {
   setupGestures();
 }
 
-function onResize() {
+function syncCameraFov() {
   const w = window.innerWidth;
   const h = window.innerHeight;
   camera.aspect = w / h;
+  if (video?.videoWidth && video.videoHeight) {
+    const ratio = video.videoHeight / video.videoWidth;
+    const hFov = (55 * Math.PI) / 180;
+    const vFov = 2 * Math.atan(ratio * Math.tan(hFov / 2));
+    camera.fov = THREE.MathUtils.clamp((vFov * 180) / Math.PI, 42, 72);
+  }
   camera.updateProjectionMatrix();
+}
+
+function onResize() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
   renderer.setSize(w, h);
+  syncCameraFov();
 }
 
 function updateAutoRotate(dt) {
@@ -314,8 +488,14 @@ function renderFrame(_t, frame) {
       if (pose) {
         lastHitMatrix = pose.transform.matrix;
         if (!placed) {
+          const m = new THREE.Matrix4().fromArray(lastHitMatrix);
+          const pos = new THREE.Vector3();
+          const quat = new THREE.Quaternion();
+          const scl = new THREE.Vector3();
+          m.decompose(pos, quat, scl);
+          reticle.position.copy(pos);
+          reticle.quaternion.copy(quat);
           reticle.visible = true;
-          reticle.matrix.fromArray(lastHitMatrix);
         }
       }
     } else if (!placed) {
@@ -424,7 +604,9 @@ async function startCameraFallback() {
     await video.play().catch(() => {});
   }
 
-  setHint('Tap the table or any surface to place the dish');
+  syncCameraFov();
+  reticle.visible = true;
+  setHint('Tap the table to place · then drag to move, pinch to zoom');
   running = true;
 
   function loop() {
