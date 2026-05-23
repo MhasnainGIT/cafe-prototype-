@@ -72,6 +72,7 @@ const gesture = {
   touchMoved: false,
   holdTimer: null,
   isDragging: false,
+  baseScale: 1,
 };
 
 /** Create dynamic UI for instructions and reset */
@@ -163,7 +164,7 @@ function setHint(text, type) {
 
 function getResponsiveScale() {
   const minDim = Math.min(window.innerWidth, window.innerHeight);
-  return Math.max(0.35, Math.min(0.85, minDim / 900));
+  return Math.max(1.2, Math.min(2.5, minDim / 300));
 }
 
 function getDracoPath() {
@@ -240,6 +241,8 @@ async function loadModel() {
   modelMesh = gltf.scene;
   prepareModelMeshes(gltf.scene);
   normalizeModel(modelMesh);
+  
+  gesture.baseScale = getResponsiveScale();
 
   if (gltf.animations?.length) {
     mixer = new THREE.AnimationMixer(modelMesh);
@@ -248,8 +251,17 @@ async function loadModel() {
 }
 
 function placeFromRay(ndcX, ndcY) {
-  // Simplified fallback placement logic (not used in primary WebXR mode)
-  anchor.position.set(0, -1, -2);
+  _raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
+  // Estimate floor plane at y = -1.2 relative to starting camera
+  const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 1.2);
+  const target = new THREE.Vector3();
+  
+  if (!_raycaster.ray.intersectPlane(floorPlane, target)) {
+    _raycaster.ray.at(2, target); // Fallback if pointing at horizon
+  }
+  
+  anchor.position.copy(target);
+  anchor.lookAt(camera.position.x, target.y, camera.position.z);
   onModelPlaced();
 }
 
@@ -263,15 +275,16 @@ function onModelPlaced() {
   
   // Reset transform
   modelMesh.rotation.set(0, 0, 0);
-  modelMesh.scale.set(0.01, 0.01, 0.01); // Start small for pop-in effect
+  modelMesh.scale.set(0.01, 0.01, 0.01);
   
   // Soft landing animation
   new Promise(res => {
     let s = 0.01;
+    const target = gesture.baseScale;
     const itv = setInterval(() => {
       s += 0.15;
       if (s >= 1) { s = 1; clearInterval(itv); res(); }
-      modelMesh.scale.set(s, s, s);
+      modelMesh.scale.set(s * target, s * target, s * target);
     }, 16);
   });
 
