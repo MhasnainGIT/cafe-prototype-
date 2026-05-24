@@ -50,8 +50,8 @@ const MOCK_MENU = [
     calories: "580 kcal", protein: "32g", carbs: "48g", fat: "28g"
   },
   {
-    id: "flynn-classic-pizza", name: "Flynn Classic Pizza", category: "Mains",
-    description: "House pizza with signature Flynn sauce and fresh mozzarella.",
+    id: "webhaze-classic-pizza", name: "Webhaze Classic Pizza", category: "Mains",
+    description: "House pizza with signature Webhaze sauce and fresh mozzarella.",
     price: 420, image_url: "https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=400&h=300&fit=crop",
     ar_marker_ref: "/pattern-webhaze_logo_6.patt", ar_model_url: "/models/Sushi_Platter.glb",
     is_available: true, is_veg: true, is_bestseller: false,
@@ -66,7 +66,7 @@ const MOCK_MENU = [
     calories: "420 kcal", protein: "38g", carbs: "22g", fat: "18g"
   },
   {
-    id: "flynn-espresso", name: "Flynn Signature Espresso", category: "Drinks",
+    id: "webhaze-espresso", name: "Webhaze Signature Espresso", category: "Drinks",
     description: "Double-shot espresso with house-roasted arabica beans.",
     price: 180, image_url: "https://images.unsplash.com/photo-1510707577719-ae7c14805e3a?w=400&h=300&fit=crop",
     ar_marker_ref: "/pattern-webhaze_logo_6.patt", ar_model_url: "/models/Sushi_Platter.glb",

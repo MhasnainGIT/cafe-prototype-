@@ -1,6 +1,6 @@
 # cafe-prototype-
 
-Flynn Cafe web prototype with menu, cart, and tap-to-place AR for dishes.
+Webhaze Cafe web prototype with menu, cart, and tap-to-place AR for dishes.
 
 ## Features
 

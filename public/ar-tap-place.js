@@ -354,7 +354,19 @@ function onTouchMove(ev) {
     }
 
     if (gesture.isDragging) {
-      // Movement is handled by updating anchor position in renderFrame hit-test
+      if (useWebXR) {
+        // Movement is handled by updating anchor position in renderFrame hit-test
+      } else {
+        // Fallback movement: raycast to estimated floor plane
+        const t = ev.touches[0];
+        const ndc = ndcFromClient(t.clientX, t.clientY);
+        _raycaster.setFromCamera({ x: ndc.x, y: ndc.y }, camera);
+        const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 1.2);
+        const target = new THREE.Vector3();
+        if (_raycaster.ray.intersectPlane(floorPlane, target)) {
+          anchor.position.copy(target);
+        }
+      }
     } else {
       // Standard rotation logic
       modelMesh.rotation.y += deltaX * 0.01;
@@ -481,6 +493,20 @@ function renderFrame(_t, frame) {
     } else if (!placed) {
       reticle.visible = false;
     }
+  } else if (!useWebXR && running) {
+    // Fallback reticle logic
+    if (!placed) {
+      _raycaster.setFromCamera({ x: 0, y: 0 }, camera);
+      const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 1.2);
+      const target = new THREE.Vector3();
+      if (_raycaster.ray.intersectPlane(floorPlane, target)) {
+        reticle.position.copy(target);
+        reticle.updateMatrix();
+        reticle.visible = true;
+      }
+    } else {
+      reticle.visible = gesture.isDragging;
+    }
   }
 
   renderer.render(scene, camera);
@@ -531,7 +557,7 @@ async function startWebXR() {
   }
 
   xrSession.addEventListener('select', () => {
-    if (lastHitMatrix) {
+    if (!placed && lastHitMatrix) {
       anchor.position.setFromMatrixPosition(_m4.fromArray(lastHitMatrix));
       onModelPlaced();
     }
