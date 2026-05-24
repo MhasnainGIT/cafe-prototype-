@@ -32,7 +32,7 @@ function Contact() {
         <div className="contact-info">
           <h2>Find Us</h2>
           <p>
-            123 Flynn Avenue
+            123 Webhaze  Avenue
             <br />
             Culinary District
             <br />

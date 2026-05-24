@@ -2,7 +2,7 @@ import { useState } from 'react';
 import Lightbox from '../components/Lightbox';
 
 const GALLERY_IMAGES = [
-  { id: '1', image_url: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=600&h=400&fit=crop', caption: 'Flynn Cafe Interior' },
+  { id: '1', image_url: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=600&h=400&fit=crop', caption: 'Webhaze  Cafe Interior' },
   { id: '2', image_url: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&h=400&fit=crop', caption: 'Grand Royale Burger' },
   { id: '3', image_url: 'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=600&h=400&fit=crop', caption: 'Imperial Truffle Pizza' },
   { id: '4', image_url: 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=600&h=400&fit=crop', caption: 'Fine Dining' },

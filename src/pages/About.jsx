@@ -3,7 +3,7 @@ function About() {
     <div className="page-shell">
       <h1 className="section-title">Our Story</h1>
       <p className="page-lead" style={{ textAlign: 'center' }}>
-        Born from a passion for culinary excellence and immersive dining, Flynn Cafe redefines modern
+        Born from a passion for culinary excellence and immersive dining, Webhaze  Cafe redefines modern
         hospitality—every meal is a journey for the palate and the senses.
       </p>
 

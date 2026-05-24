@@ -28,7 +28,7 @@ function Header() {
   return (
     <header className="site-header">
       <Link to="/" className="site-logo" onClick={() => setOpen(false)}>
-        Flynn Cafe
+        Webhaze  Cafe
       </Link>
 
       <div className="site-header-actions">

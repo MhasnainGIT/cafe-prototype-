@@ -24,10 +24,10 @@ function Home() {
           loop
           playsInline
           poster="https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1920&h=1080&fit=crop"
-          data-src="/assets/flynn-cafe-hero.mp4"
+          data-src="/assets/Webhaze -cafe-hero.mp4"
         />
         <div className="hero-overlay">
-          <h1 className="hero-title">Flynn Cafe</h1>
+          <h1 className="hero-title">Webhaze  Cafe</h1>
           <p className="hero-subtitle">Immersive Culinary Experiences</p>
           <div className="hero-actions">
             <Link to="/contact" className="btn btn-primary">

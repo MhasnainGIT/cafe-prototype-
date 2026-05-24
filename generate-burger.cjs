@@ -199,7 +199,7 @@ const nodes = gltfMeshes.map((_, i) => ({ mesh: i }));
 const binBuffer = Buffer.concat(binChunks);
 
 const gltfJson = {
-  asset: { version: '2.0', generator: 'Flynn Cafe Burger Generator' },
+  asset: { version: '2.0', generator: 'Webhaze  Cafe Burger Generator' },
   scene: 0,
   scenes: [{ nodes: nodes.map((_, i) => i) }],
   nodes,
