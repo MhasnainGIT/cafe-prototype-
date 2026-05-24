@@ -224,14 +224,25 @@ async function loadModel() {
   try {
     draco.setDecoderPath(getDracoPath());
     loader.setDRACOLoader(draco);
-  } catch (e) { console.warn("Draco not configured", e); }
+  } catch (e) {
+    console.warn("Draco not configured", e);
+  }
 
-  const gltf = await loader.loadAsync(modelUrl, (xhr) => {
+  // Obfuscation: Fetch as blob to prevent direct linking and hide simple URL patterns
+  const response = await fetch(modelUrl, {
+    headers: { 'X-Requested-With': 'WebhazeAR' } // Custom header for server-side verification
+  });
+  const blob = await response.blob();
+  const blobUrl = URL.createObjectURL(blob);
+
+  const gltf = await loader.loadAsync(blobUrl, (xhr) => {
     if (xhr.lengthComputable) {
       const percent = (xhr.loaded / xhr.total) * 100;
       if (loadingBar) loadingBar.style.width = `${percent}%`;
     }
   });
+
+  URL.revokeObjectURL(blobUrl);
 
   if (loadingBarContainer) {
     loadingBarContainer.style.opacity = '0';
